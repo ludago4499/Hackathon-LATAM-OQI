@@ -2,9 +2,7 @@
 Benchmark instance for the SDG 6.4 Guided Challenge:
 Sustainable Water Allocation in the Alto Atoyac Basin Under Drought Scenarios.
 
-All values are taken directly from Annex A of the challenge document.
-This is the SINGLE SOURCE OF TRUTH for the instance. The MILP, QUBO, and QAOA
-modules must all import from here so the comparison stays valid.
+All values are taken directly from Annex A of the challenge document. 
 
 Units: hm^3 / year (cubic hectometers per year).
 """
@@ -22,22 +20,24 @@ AGRI_DEMAND = {
 }
 
 # --- A.3 Water sources: base availability (hm^3/year) ---------------------
+# We modify the amount of water sources depending on drought scenarios (3 levels). These sources are our A_i
 SOURCES = {
     "VdP": 80,        # Valle de Puebla Aquifer (groundwater)
     "AI": 45,         # Atlixco-Izucar Aquifer (groundwater)
 }
 
 # --- A.4 Drought scenarios: availability factor (alpha) -------------------
-# Effective availability A_eff_i = alpha * A_i
+# Effective availability A_eff_i = alpha * A_i 
 DROUGHT = {
     "Normal": 1.00,
     "Moderate": 0.80,
     "Severe": 0.60,
-    # "Extreme": 0.40,  # mentioned on the data-inputs slide; optional
+    # "Extreme": 0.40,  # mentioned but currently not in use.
 }
 
 # --- A.5 Source -> municipality allocation cost ---------------------------
 # Relative delivery difficulty (NOT real infrastructure cost). Used only if lambda > 0.
+# not used currently since lambda neq 0
 COST = {
     ("VdP", "Puebla"): 1.0,
     ("VdP", "SAC"): 1.2,
@@ -52,14 +52,14 @@ W_URBAN = 10
 W_AGRI = 3
 
 # --- A.7 Optional crop-water requirements (m^3/ha/year) -------------------
-# Only needed if you expand the agricultural demand model (Annex A.7).
+# Only needed if expanding agriculture demand model.
 CROP_WATER = {
     "Maize": 7000, "Alfalfa": 12000, "Beans": 4500, "Wheat": 5500,
     "Barley": 4500, "Sorghum": 6000, "Oats": 5000, "Vegetables": 8000,
     "Potato": 6500, "Onion": 7500, "ChiliPepper": 6500, "FruitTrees": 9000,
 }
 
-MUNICIPALITIES = list(URBAN_DEMAND.keys())
+MUNICIPALITIES = list(URBAN_DEMAND.keys()) # the basic not including san pedro cholula, amozoc, ocoyucan, juan c etc.
 SOURCE_NAMES = list(SOURCES.keys())
 
 
