@@ -1,0 +1,938 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AEGIS — SDG 6.4 Water Allocation</title>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&family=Inter:wght@300;400;500;600&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
+<style>
+  /* ── TOKEN SYSTEM ─────────────────────────────── */
+  :root {
+    --deep: #0B1E3D;
+    --teal: #1A9B8C;
+    --aqua: #4FC3C0;
+    --sky: #A8E4E1;
+    --frost: #F0F8FF;
+    --muted: #8FA5B2;
+    --panel: rgba(255,255,255,0.04);
+    --border: rgba(79,195,192,0.2);
+    --red: #E05C5C;
+    --yellow: #F5C542;
+    --green: #4FCDA0;
+
+    --display: 'Space Grotesk', sans-serif;
+    --body: 'Inter', sans-serif;
+    --mono: 'Space Mono', monospace;
+  }
+
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { width: 100%; height: 100%; background: var(--deep); color: var(--frost); font-family: var(--body); overflow: hidden; }
+
+  /* ── SLIDE SYSTEM ─────────────────────────────── */
+  .deck { width: 100vw; height: 100vh; position: relative; }
+  .slide {
+    position: absolute; inset: 0;
+    display: flex; flex-direction: column;
+    padding: 48px 64px;
+    opacity: 0; pointer-events: none;
+    transition: opacity 0.5s ease, transform 0.5s ease;
+    transform: translateY(16px);
+    overflow: hidden;
+  }
+  .slide.active { opacity: 1; pointer-events: all; transform: translateY(0); }
+  .slide.out { opacity: 0; transform: translateY(-16px); }
+
+  /* ── NAVIGATION ───────────────────────────────── */
+  .nav {
+    position: fixed; bottom: 32px; left: 50%; transform: translateX(-50%);
+    display: flex; align-items: center; gap: 12px; z-index: 100;
+    background: rgba(11,30,61,0.85); backdrop-filter: blur(12px);
+    border: 1px solid var(--border); border-radius: 40px;
+    padding: 10px 20px;
+  }
+  .nav button {
+    background: none; border: none; cursor: pointer;
+    color: var(--muted); font-family: var(--display); font-size: 13px;
+    font-weight: 500; padding: 6px 14px; border-radius: 24px;
+    transition: all 0.2s;
+  }
+  .nav button:hover { color: var(--aqua); }
+  .nav button.nav-prev, .nav button.nav-next {
+    font-size: 16px; padding: 6px 12px;
+  }
+  .nav-counter { color: var(--muted); font-family: var(--mono); font-size: 12px; min-width: 48px; text-align: center; }
+  .dot-row { display: flex; gap: 6px; align-items: center; }
+  .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--muted); transition: all 0.3s; cursor: pointer; }
+  .dot.active { background: var(--aqua); width: 18px; border-radius: 3px; }
+
+  /* ── SHARED ELEMENTS ──────────────────────────── */
+  .eyebrow { font-family: var(--mono); font-size: 11px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--teal); margin-bottom: 8px; }
+  .slide-title { font-family: var(--display); font-weight: 700; font-size: clamp(28px,3.5vw,48px); line-height: 1.1; margin-bottom: 4px; }
+  .slide-sub { color: var(--muted); font-size: 15px; font-weight: 400; margin-bottom: 36px; }
+  .teal { color: var(--teal); }
+  .aqua { color: var(--aqua); }
+  .muted { color: var(--muted); }
+
+  .card {
+    background: var(--panel); border: 1px solid var(--border);
+    border-radius: 16px; padding: 24px 28px;
+  }
+  .card-label { font-family: var(--mono); font-size: 10px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--teal); margin-bottom: 6px; }
+  .card-value { font-family: var(--display); font-size: 32px; font-weight: 700; }
+  .card-desc { font-size: 13px; color: var(--muted); margin-top: 4px; line-height: 1.5; }
+
+  .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+  .grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 20px; }
+  .grid-4 { display: grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap: 16px; }
+
+  .tag {
+    display: inline-flex; align-items: center; gap: 6px;
+    font-family: var(--mono); font-size: 11px; font-weight: 700;
+    letter-spacing: 0.08em; padding: 4px 10px; border-radius: 4px;
+    text-transform: uppercase;
+  }
+  .tag-teal { background: rgba(26,155,140,0.15); color: var(--aqua); border: 1px solid rgba(79,195,192,0.3); }
+  .tag-red { background: rgba(224,92,92,0.12); color: var(--red); border: 1px solid rgba(224,92,92,0.3); }
+  .tag-yellow { background: rgba(245,197,66,0.12); color: var(--yellow); border: 1px solid rgba(245,197,66,0.3); }
+
+  .placeholder {
+    background: repeating-linear-gradient(45deg, rgba(79,195,192,0.04), rgba(79,195,192,0.04) 10px, transparent 10px, transparent 20px);
+    border: 2px dashed var(--border); border-radius: 12px;
+    display: flex; align-items: center; justify-content: center; flex-direction: column; gap: 8px;
+    color: var(--muted); font-family: var(--mono); font-size: 12px; text-align: center;
+    padding: 20px;
+  }
+  .placeholder-icon { font-size: 28px; opacity: 0.4; }
+
+  /* ── SLIDE 1 — COVER ──────────────────────────── */
+  #s1 { justify-content: center; align-items: flex-start; position: relative; }
+  .cover-bg {
+    position: absolute; inset: 0; z-index: 0;
+    background: radial-gradient(ellipse at 70% 50%, rgba(26,155,140,0.12) 0%, transparent 60%),
+                radial-gradient(ellipse at 20% 80%, rgba(79,195,192,0.06) 0%, transparent 50%);
+  }
+  .cover-content { position: relative; z-index: 1; max-width: 680px; }
+  .logo-mark {
+    width: 64px; height: 64px; margin-bottom: 28px;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .cover-title {
+    font-family: var(--display); font-weight: 700;
+    font-size: clamp(48px, 6vw, 80px); line-height: 1.0;
+    letter-spacing: -0.02em; margin-bottom: 20px;
+  }
+  .cover-title span { color: var(--aqua); }
+  .cover-tagline { font-size: 18px; color: var(--muted); line-height: 1.6; max-width: 500px; margin-bottom: 36px; }
+  .cover-badges { display: flex; gap: 10px; flex-wrap: wrap; }
+  .cover-right {
+    position: absolute; right: 64px; top: 50%; transform: translateY(-50%);
+    z-index: 1;
+  }
+
+  /* ── WAVE SVG animation ───────────────────────── */
+  .wave-container { position: absolute; bottom: 0; left: 0; right: 0; height: 120px; overflow: hidden; }
+  .wave-path { animation: waveMove 6s ease-in-out infinite alternate; }
+  @keyframes waveMove { from { d: path("M0,60 C200,20 400,100 600,60 C800,20 1000,80 1200,60 C1400,40 1600,70 1920,60 L1920,120 L0,120 Z"); }
+    to { d: path("M0,80 C200,40 400,110 600,70 C800,30 1000,90 1200,70 C1400,50 1600,80 1920,70 L1920,120 L0,120 Z"); } }
+
+  /* ── SLIDE 2 — PROBLEM ────────────────────────── */
+  .problem-row { display: flex; gap: 24px; }
+  .problem-stat { text-align: center; }
+  .problem-stat .num { font-family: var(--display); font-size: 52px; font-weight: 700; color: var(--aqua); line-height: 1; }
+  .problem-stat .label { font-size: 13px; color: var(--muted); margin-top: 4px; }
+  .basin-info { flex: 1; }
+
+  /* ── SLIDE 3 — MODEL ──────────────────────────── */
+  .flow-net {
+    width: 100%; height: 220px; position: relative;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .node {
+    position: absolute; border-radius: 10px;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    padding: 10px 16px; gap: 4px; text-align: center;
+  }
+  .node-source {
+    background: rgba(26,155,140,0.15); border: 2px solid var(--teal);
+    width: 130px;
+  }
+  .node-demand {
+    background: rgba(79,195,192,0.08); border: 1px solid var(--border);
+    width: 110px;
+  }
+  .node-label { font-family: var(--mono); font-size: 10px; color: var(--teal); text-transform: uppercase; letter-spacing: 0.08em; }
+  .node-name { font-family: var(--display); font-weight: 600; font-size: 12px; }
+  .node-val { font-size: 11px; color: var(--muted); }
+  .edge { position: absolute; z-index: 0; }
+
+  /* ── SLIDE 5 — METRICS ────────────────────────── */
+  .metric-row { display: flex; gap: 16px; align-items: stretch; }
+  .metric-bar-wrap { flex: 1; }
+  .bar-label { font-family: var(--mono); font-size: 11px; color: var(--muted); margin-bottom: 6px; display: flex; justify-content: space-between; }
+  .bar-track { height: 8px; background: rgba(255,255,255,0.06); border-radius: 4px; overflow: hidden; }
+  .bar-fill { height: 100%; border-radius: 4px; transition: width 1s ease; }
+  .bar-teal { background: var(--teal); }
+  .bar-aqua { background: var(--aqua); }
+  .bar-yellow { background: var(--yellow); }
+  .bar-red { background: var(--red); }
+
+  /* ── SLIDE 6 — FINANCIAL ──────────────────────── */
+  .fin-big { font-family: var(--display); font-size: 56px; font-weight: 700; color: var(--aqua); line-height: 1; }
+  .fin-unit { font-size: 18px; color: var(--muted); font-weight: 400; margin-left: 4px; }
+
+  /* ── SLIDE 7 — QUANTUM ────────────────────────── */
+  .qubo-formula {
+    background: rgba(0,0,0,0.3); border: 1px solid var(--border);
+    border-radius: 12px; padding: 20px 28px;
+    font-family: var(--mono); font-size: 14px;
+    color: var(--aqua); line-height: 2;
+  }
+  .qubo-formula .kw { color: var(--frost); }
+  .qubo-formula .cm { color: var(--muted); font-size: 12px; }
+
+  /* ── SLIDE 8 — TEAM / CLOSE ───────────────────── */
+  .team-card {
+    background: var(--panel); border: 1px solid var(--border);
+    border-radius: 16px; padding: 24px;
+    display: flex; flex-direction: column; align-items: center; gap: 12px; text-align: center;
+  }
+  .avatar {
+    width: 64px; height: 64px; border-radius: 50%;
+    background: linear-gradient(135deg, var(--teal), var(--aqua));
+    display: flex; align-items: center; justify-content: center;
+    font-family: var(--display); font-weight: 700; font-size: 22px; color: var(--deep);
+  }
+
+  /* ── HEADER BAR ───────────────────────────────── */
+  .slide-header {
+    display: flex; align-items: center; justify-content: space-between;
+    margin-bottom: 32px;
+  }
+  .aegis-wordmark {
+    font-family: var(--display); font-weight: 700; font-size: 15px;
+    letter-spacing: 0.1em; color: var(--teal); text-transform: uppercase;
+    display: flex; align-items: center; gap: 8px;
+  }
+  .slide-number { font-family: var(--mono); font-size: 12px; color: var(--muted); }
+
+  /* ── progress line ────────────────────────────── */
+  .progress-line {
+    position: fixed; top: 0; left: 0; height: 2px;
+    background: linear-gradient(90deg, var(--teal), var(--aqua));
+    transition: width 0.4s ease; z-index: 200;
+  }
+
+  /* ── scenario pills ───────────────────────────── */
+  .scenario-row { display: flex; gap: 12px; margin-bottom: 20px; }
+  .scenario-pill {
+    padding: 6px 16px; border-radius: 20px; font-family: var(--mono);
+    font-size: 11px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase;
+    cursor: pointer; transition: all 0.2s;
+    border: 1px solid var(--border); color: var(--muted); background: transparent;
+  }
+  .scenario-pill.active-pill { background: var(--teal); color: var(--deep); border-color: var(--teal); }
+
+  /* ── table ────────────────────────────────────── */
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th { font-family: var(--mono); font-size: 10px; text-transform: uppercase;
+       letter-spacing: 0.1em; color: var(--teal); padding: 8px 12px;
+       border-bottom: 1px solid var(--border); text-align: left; }
+  td { padding: 10px 12px; border-bottom: 1px solid rgba(255,255,255,0.04); }
+  tr:last-child td { border-bottom: none; }
+  .td-num { font-family: var(--mono); font-size: 13px; }
+
+  /* keyboard hint */
+  .key-hint { position: fixed; top: 24px; right: 32px; font-family: var(--mono);
+    font-size: 11px; color: var(--muted); z-index: 100; }
+  .key-hint kbd { background: var(--panel); border: 1px solid var(--border);
+    border-radius: 4px; padding: 2px 6px; font-size: 11px; }
+</style>
+</head>
+<body>
+
+<div class="progress-line" id="progressLine"></div>
+<div class="key-hint"><kbd>←</kbd> <kbd>→</kbd> navegar</div>
+
+<div class="deck" id="deck">
+
+  <!-- ══════════════════════════════════════════════════
+       SLIDE 1 — COVER
+  ══════════════════════════════════════════════════ -->
+  <div class="slide active" id="s1">
+    <div class="cover-bg"></div>
+
+    <div class="cover-content">
+      <div class="logo-mark">
+        <svg width="64" height="64" viewBox="0 0 64 64" fill="none">
+          <path d="M32 4 L56 16 L56 36 C56 49 44 58 32 62 C20 58 8 49 8 36 L8 16 Z" fill="rgba(26,155,140,0.15)" stroke="#1A9B8C" stroke-width="1.5"/>
+          <path d="M32 14 L48 22 L48 36 C48 45 41 52 32 55 C23 52 16 45 16 36 L16 22 Z" fill="rgba(79,195,192,0.08)" stroke="#4FC3C0" stroke-width="1"/>
+          <circle cx="32" cy="35" r="6" fill="none" stroke="#4FC3C0" stroke-width="1.5"/>
+          <path d="M26 35 Q28 29 32 35 Q36 29 38 35" stroke="#4FC3C0" stroke-width="1.2" fill="none"/>
+          <circle cx="32" cy="35" r="2" fill="#4FC3C0"/>
+        </svg>
+      </div>
+
+      <div class="eyebrow">SDG 6.4 Guided Challenge · QWorld OQI Hackathon-LATAM 2026</div>
+      <div class="cover-title">AEGIS<br><span>Water</span></div>
+      <p class="cover-tagline">Optimización cuántica-clásica de la asignación hídrica en la cuenca Alto Atoyac bajo escenarios de sequía.</p>
+      <div class="cover-badges">
+        <span class="tag tag-teal">MILP Baseline</span>
+        <span class="tag tag-teal">QUBO Formulation</span>
+        <span class="tag tag-teal">QAOA</span>
+        <span class="tag tag-yellow">Alto Atoyac Basin</span>
+      </div>
+    </div>
+
+    <div class="cover-right">
+      <svg width="280" height="340" viewBox="0 0 280 340" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <!-- Animated water allocation network -->
+        <!-- Sources -->
+        <rect x="10" y="60" width="100" height="52" rx="10" fill="rgba(26,155,140,0.12)" stroke="#1A9B8C" stroke-width="1.5"/>
+        <text x="60" y="81" text-anchor="middle" fill="#4FC3C0" font-family="Space Mono" font-size="8" letter-spacing="1">FUENTE A</text>
+        <text x="60" y="97" text-anchor="middle" fill="#F0F8FF" font-family="Space Grotesk" font-weight="600" font-size="10">Valle Puebla</text>
+        <text x="60" y="109" text-anchor="middle" fill="#8FA5B2" font-family="Space Mono" font-size="9">80 hm³</text>
+
+        <rect x="10" y="190" width="100" height="52" rx="10" fill="rgba(26,155,140,0.12)" stroke="#1A9B8C" stroke-width="1.5"/>
+        <text x="60" y="211" text-anchor="middle" fill="#4FC3C0" font-family="Space Mono" font-size="8" letter-spacing="1">FUENTE B</text>
+        <text x="60" y="227" text-anchor="middle" fill="#F0F8FF" font-family="Space Grotesk" font-weight="600" font-size="10">Atlixco-Izúcar</text>
+        <text x="60" y="239" text-anchor="middle" fill="#8FA5B2" font-family="Space Mono" font-size="9">45 hm³</text>
+
+        <!-- Demand nodes -->
+        <rect x="170" y="20" width="100" height="44" rx="8" fill="rgba(79,195,192,0.06)" stroke="rgba(79,195,192,0.3)" stroke-width="1"/>
+        <text x="220" y="38" text-anchor="middle" fill="#F0F8FF" font-family="Space Grotesk" font-weight="600" font-size="10">Puebla</text>
+        <text x="220" y="52" text-anchor="middle" fill="#8FA5B2" font-family="Space Mono" font-size="9">95+8 hm³</text>
+
+        <rect x="170" y="98" width="100" height="44" rx="8" fill="rgba(79,195,192,0.06)" stroke="rgba(79,195,192,0.3)" stroke-width="1"/>
+        <text x="220" y="116" text-anchor="middle" fill="#F0F8FF" font-family="Space Grotesk" font-weight="600" font-size="10">S.A. Cholula</text>
+        <text x="220" y="130" text-anchor="middle" fill="#8FA5B2" font-family="Space Mono" font-size="9">14+5 hm³</text>
+
+        <rect x="170" y="176" width="100" height="44" rx="8" fill="rgba(79,195,192,0.06)" stroke="rgba(79,195,192,0.3)" stroke-width="1"/>
+        <text x="220" y="194" text-anchor="middle" fill="#F0F8FF" font-family="Space Grotesk" font-weight="600" font-size="10">Atlixco</text>
+        <text x="220" y="208" text-anchor="middle" fill="#8FA5B2" font-family="Space Mono" font-size="9">9+18 hm³</text>
+
+        <!-- Edges with animated dashes -->
+        <line x1="110" y1="86" x2="170" y2="42" stroke="#1A9B8C" stroke-width="1.2" stroke-dasharray="4 3" opacity="0.7">
+          <animate attributeName="stroke-dashoffset" from="0" to="-14" dur="1.5s" repeatCount="indefinite"/>
+        </line>
+        <line x1="110" y1="90" x2="170" y2="120" stroke="#1A9B8C" stroke-width="1.2" stroke-dasharray="4 3" opacity="0.5">
+          <animate attributeName="stroke-dashoffset" from="0" to="-14" dur="1.8s" repeatCount="indefinite"/>
+        </line>
+        <line x1="110" y1="94" x2="170" y2="198" stroke="#1A9B8C" stroke-width="0.8" stroke-dasharray="4 3" opacity="0.3">
+          <animate attributeName="stroke-dashoffset" from="0" to="-14" dur="2.2s" repeatCount="indefinite"/>
+        </line>
+        <line x1="110" y1="210" x2="170" y2="50" stroke="#4FC3C0" stroke-width="0.8" stroke-dasharray="4 3" opacity="0.3">
+          <animate attributeName="stroke-dashoffset" from="0" to="-14" dur="2s" repeatCount="indefinite"/>
+        </line>
+        <line x1="110" y1="215" x2="170" y2="125" stroke="#4FC3C0" stroke-width="1" stroke-dasharray="4 3" opacity="0.5">
+          <animate attributeName="stroke-dashoffset" from="0" to="-14" dur="1.6s" repeatCount="indefinite"/>
+        </line>
+        <line x1="110" y1="220" x2="170" y2="198" stroke="#4FC3C0" stroke-width="1.2" stroke-dasharray="4 3" opacity="0.8">
+          <animate attributeName="stroke-dashoffset" from="0" to="-14" dur="1.3s" repeatCount="indefinite"/>
+        </line>
+
+        <!-- Cost labels -->
+        <text x="140" y="62" text-anchor="middle" fill="#4FC3C0" font-family="Space Mono" font-size="8" opacity="0.8">c=1.0</text>
+        <text x="140" y="110" text-anchor="middle" fill="#4FC3C0" font-family="Space Mono" font-size="8" opacity="0.6">c=1.2</text>
+        <text x="145" y="200" text-anchor="middle" fill="#4FC3C0" font-family="Space Mono" font-size="8" opacity="0.8">c=1.0</text>
+
+        <!-- NWWD badge -->
+        <rect x="60" y="270" width="160" height="50" rx="10" fill="rgba(26,155,140,0.1)" stroke="rgba(79,195,192,0.3)" stroke-width="1"/>
+        <text x="140" y="289" text-anchor="middle" fill="#4FC3C0" font-family="Space Mono" font-size="9" letter-spacing="1">OBJETIVO</text>
+        <text x="140" y="307" text-anchor="middle" fill="#F0F8FF" font-family="Space Grotesk" font-weight="700" font-size="11">min NWWD</text>
+        <text x="140" y="319" text-anchor="middle" fill="#8FA5B2" font-family="Space Mono" font-size="8">wU=10 · wA=3</text>
+      </svg>
+    </div>
+
+    <div class="wave-container">
+      <svg viewBox="0 0 1920 120" xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="none" style="width:100%;height:100%">
+        <path class="wave-path" fill="rgba(26,155,140,0.06)" d="M0,60 C200,20 400,100 600,60 C800,20 1000,80 1200,60 C1400,40 1600,70 1920,60 L1920,120 L0,120 Z"/>
+        <path fill="rgba(79,195,192,0.03)" d="M0,80 C300,50 600,100 900,70 C1200,40 1500,90 1920,75 L1920,120 L0,120 Z"/>
+      </svg>
+    </div>
+  </div>
+
+  <!-- ══════════════════════════════════════════════════
+       SLIDE 2 — PROBLEMA
+  ══════════════════════════════════════════════════ -->
+  <div class="slide" id="s2">
+    <div class="slide-header">
+      <div class="aegis-wordmark">
+        <svg width="20" height="20" viewBox="0 0 64 64" fill="none"><path d="M32 4 L56 16 L56 36 C56 49 44 58 32 62 C20 58 8 49 8 36 L8 16 Z" fill="none" stroke="#1A9B8C" stroke-width="2"/><circle cx="32" cy="35" r="5" fill="none" stroke="#4FC3C0" stroke-width="1.5"/><path d="M26 35 Q29 29 32 35 Q35 29 38 35" stroke="#4FC3C0" stroke-width="1.2" fill="none"/></svg>
+        AEGIS
+      </div>
+      <div class="slide-number">02 / 08</div>
+    </div>
+
+    <div class="eyebrow">Contexto del Problema</div>
+    <div class="slide-title">La Cuenca Alto Atoyac<br>bajo presión hídrica</div>
+    <div class="slide-sub">Poblaciones urbanas, agricultores y la industria compiten por un recurso que la sequía reduce hasta 40%.</div>
+
+    <div class="grid-3" style="margin-bottom:24px">
+      <div class="card">
+        <div class="card-label">Acuífero Valle de Puebla</div>
+        <div class="card-value aqua">80 <span style="font-size:18px;color:var(--muted)">hm³</span></div>
+        <div class="card-desc">Disponibilidad base anual en condiciones normales</div>
+      </div>
+      <div class="card">
+        <div class="card-label">Acuífero Atlixco-Izúcar</div>
+        <div class="card-value aqua">45 <span style="font-size:18px;color:var(--muted)">hm³</span></div>
+        <div class="card-desc">Fuente secundaria con mayor costo de distribución</div>
+      </div>
+      <div class="card">
+        <div class="card-label">Demanda total del sistema</div>
+        <div class="card-value" style="color:var(--yellow)">149 <span style="font-size:18px;color:var(--muted)">hm³</span></div>
+        <div class="card-desc">Suma de demandas urbanas (118) y agrícolas (31)</div>
+      </div>
+    </div>
+
+    <div class="grid-2">
+      <div class="card">
+        <div class="card-label">Escenarios de sequía</div>
+        <div style="display:flex;flex-direction:column;gap:12px;margin-top:8px">
+          <div>
+            <div style="display:flex;justify-content:space-between;margin-bottom:4px">
+              <span style="font-size:13px">Normal (α = 1.00)</span>
+              <span class="tag tag-teal">125 hm³</span>
+            </div>
+            <div class="bar-track"><div class="bar-fill bar-teal" style="width:100%"></div></div>
+          </div>
+          <div>
+            <div style="display:flex;justify-content:space-between;margin-bottom:4px">
+              <span style="font-size:13px">Sequía moderada (α = 0.80)</span>
+              <span class="tag tag-yellow">100 hm³</span>
+            </div>
+            <div class="bar-track"><div class="bar-fill bar-yellow" style="width:80%"></div></div>
+          </div>
+          <div>
+            <div style="display:flex;justify-content:space-between;margin-bottom:4px">
+              <span style="font-size:13px">Sequía severa (α = 0.60)</span>
+              <span class="tag tag-red">75 hm³</span>
+            </div>
+            <div class="bar-track"><div class="bar-fill bar-red" style="width:60%"></div></div>
+          </div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-label">Municipios en el modelo</div>
+        <table>
+          <thead><tr><th>Municipio</th><th>Urbana</th><th>Agrícola</th></tr></thead>
+          <tbody>
+            <tr><td>Puebla</td><td class="td-num">95 hm³</td><td class="td-num">8 hm³</td></tr>
+            <tr><td>S.A. Cholula</td><td class="td-num">14 hm³</td><td class="td-num">5 hm³</td></tr>
+            <tr><td>Atlixco</td><td class="td-num">9 hm³</td><td class="td-num">18 hm³</td></tr>
+          </tbody>
+        </table>
+        <div style="margin-top:12px;display:flex;gap:8px">
+          <span class="tag tag-teal">wU = 10</span>
+          <span class="tag tag-yellow">wA = 3</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══════════════════════════════════════════════════
+       SLIDE 3 — MODELO MILP
+  ══════════════════════════════════════════════════ -->
+  <div class="slide" id="s3">
+    <div class="slide-header">
+      <div class="aegis-wordmark"><svg width="20" height="20" viewBox="0 0 64 64" fill="none"><path d="M32 4 L56 16 L56 36 C56 49 44 58 32 62 C20 58 8 49 8 36 L8 16 Z" fill="none" stroke="#1A9B8C" stroke-width="2"/><circle cx="32" cy="35" r="5" fill="none" stroke="#4FC3C0" stroke-width="1.5"/><path d="M26 35 Q29 29 32 35 Q35 29 38 35" stroke="#4FC3C0" stroke-width="1.2" fill="none"/></svg>AEGIS</div>
+      <div class="slide-number">03 / 08</div>
+    </div>
+
+    <div class="eyebrow">Baseline Clásico</div>
+    <div class="slide-title">Modelo MILP</div>
+    <div class="slide-sub">Mixed Integer Linear Programming — formulación de referencia que el enfoque cuántico debe replicar.</div>
+
+    <div class="grid-2" style="gap:24px">
+      <div style="display:flex;flex-direction:column;gap:16px">
+        <div class="card">
+          <div class="card-label">Función Objetivo</div>
+          <div style="font-family:var(--mono);font-size:13px;color:var(--frost);line-height:2.0;margin-top:8px">
+            <span style="color:var(--teal)">min</span> <span style="color:var(--aqua)">wU</span>·Σⱼ(u<sup>urb</sup>ⱼ/D<sup>urb</sup>ⱼ) + <span style="color:var(--yellow)">wA</span>·Σⱼ(u<sup>agri</sup>ⱼ/D<sup>agri</sup>ⱼ)<br>
+            <span style="color:var(--muted);font-size:11px">+ λ · Σᵢⱼ cᵢⱼ(x<sup>urb</sup>ᵢⱼ + x<sup>agri</sup>ᵢⱼ)</span>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-label">Restricciones</div>
+          <div style="display:flex;flex-direction:column;gap:10px;margin-top:8px">
+            <div style="display:flex;align-items:flex-start;gap:10px">
+              <span class="tag tag-teal" style="flex-shrink:0;margin-top:2px">Cap.</span>
+              <span style="font-size:13px;color:var(--muted)">Σⱼ(x<sup>urb</sup>ᵢⱼ + x<sup>agri</sup>ᵢⱼ) ≤ A<sup>eff</sup>ᵢ   ∀i</span>
+            </div>
+            <div style="display:flex;align-items:flex-start;gap:10px">
+              <span class="tag tag-teal" style="flex-shrink:0;margin-top:2px">Urb.</span>
+              <span style="font-size:13px;color:var(--muted)">Σᵢ x<sup>urb</sup>ᵢⱼ + u<sup>urb</sup>ⱼ = D<sup>urb</sup>ⱼ   ∀j</span>
+            </div>
+            <div style="display:flex;align-items:flex-start;gap:10px">
+              <span class="tag tag-yellow" style="flex-shrink:0;margin-top:2px">Agri.</span>
+              <span style="font-size:13px;color:var(--muted)">Σᵢ x<sup>agri</sup>ᵢⱼ + u<sup>agri</sup>ⱼ = D<sup>agri</sup>ⱼ   ∀j</span>
+            </div>
+            <div style="display:flex;align-items:flex-start;gap:10px">
+              <span class="tag tag-teal" style="flex-shrink:0;margin-top:2px">≥ 0</span>
+              <span style="font-size:13px;color:var(--muted)">Todas las variables no-negativas</span>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div>
+        <div class="card" style="height:100%">
+          <div class="card-label">Resultados MILP — escenario a completar</div>
+          <div class="scenario-row" style="margin-top:12px">
+            <button class="scenario-pill active-pill">Normal</button>
+            <button class="scenario-pill">Mod. drought</button>
+            <button class="scenario-pill">Severe</button>
+          </div>
+          <div class="placeholder" style="height:200px">
+            <div class="placeholder-icon">📊</div>
+            <div>Tabla de asignación óptima<br><span style="font-size:10px;opacity:0.5">xᵢⱼ por fuente y municipio</span></div>
+          </div>
+          <div class="grid-2" style="gap:12px;margin-top:16px">
+            <div style="text-align:center">
+              <div style="font-family:var(--mono);font-size:11px;color:var(--teal);margin-bottom:4px">NWWD</div>
+              <div style="font-family:var(--display);font-size:32px;font-weight:700;color:var(--muted)">—</div>
+            </div>
+            <div style="text-align:center">
+              <div style="font-family:var(--mono);font-size:11px;color:var(--teal);margin-bottom:4px">Runtime</div>
+              <div style="font-family:var(--display);font-size:32px;font-weight:700;color:var(--muted)">—</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══════════════════════════════════════════════════
+       SLIDE 4 — QUBO + QAOA
+  ══════════════════════════════════════════════════ -->
+  <div class="slide" id="s4">
+    <div class="slide-header">
+      <div class="aegis-wordmark"><svg width="20" height="20" viewBox="0 0 64 64" fill="none"><path d="M32 4 L56 16 L56 36 C56 49 44 58 32 62 C20 58 8 49 8 36 L8 16 Z" fill="none" stroke="#1A9B8C" stroke-width="2"/><circle cx="32" cy="35" r="5" fill="none" stroke="#4FC3C0" stroke-width="1.5"/><path d="M26 35 Q29 29 32 35 Q35 29 38 35" stroke="#4FC3C0" stroke-width="1.2" fill="none"/></svg>AEGIS</div>
+      <div class="slide-number">04 / 08</div>
+    </div>
+
+    <div class="eyebrow">Enfoque Cuántico</div>
+    <div class="slide-title">QUBO → QAOA</div>
+    <div class="slide-sub">Reformulación del MILP como problema cuadrático binario sin restricciones.</div>
+
+    <div class="grid-2" style="gap:24px">
+      <div style="display:flex;flex-direction:column;gap:16px">
+        <div class="qubo-formula">
+          <span class="kw">min</span> <span style="color:var(--aqua)">x</span><sup>T</sup><span style="color:var(--yellow)">Q</span><span style="color:var(--aqua)">x</span><br>
+          <span class="cm">// x : vector de decisión binario</span><br>
+          <span class="cm">// Q : coeficientes objetivo + penalizaciones</span><br><br>
+          <span class="kw">encode</span>: x<sup>urb</sup>ᵢⱼ → bits con granularidad δ<br>
+          <span class="cm">// n_bits = ⌈log₂(A_max / δ)⌉</span>
+        </div>
+        <div class="card">
+          <div class="card-label">Penalizaciones de restricciones</div>
+          <div style="display:flex;flex-direction:column;gap:8px;margin-top:8px;font-size:13px">
+            <div style="display:flex;justify-content:space-between">
+              <span style="color:var(--muted)">Capacidad fuente</span>
+              <span style="font-family:var(--mono);color:var(--aqua)">P₁·(Σxᵢⱼ − Aᵢ)²</span>
+            </div>
+            <div style="display:flex;justify-content:space-between">
+              <span style="color:var(--muted)">Balance urbano</span>
+              <span style="font-family:var(--mono);color:var(--aqua)">P₂·(Σx<sup>u</sup>ᵢⱼ+uⱼ−Dⱼ)²</span>
+            </div>
+            <div style="display:flex;justify-content:space-between">
+              <span style="color:var(--muted)">Balance agrícola</span>
+              <span style="font-family:var(--mono);color:var(--aqua)">P₃·(Σx<sup>a</sup>ᵢⱼ+uⱼ−Dⱼ)²</span>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div>
+        <div class="card" style="height:100%;display:flex;flex-direction:column;gap:16px">
+          <div class="card-label">Variables binarias y circuito QAOA</div>
+          <div class="grid-2" style="gap:12px">
+            <div style="text-align:center">
+              <div style="font-family:var(--mono);font-size:11px;color:var(--teal);margin-bottom:4px"># Variables QUBO</div>
+              <div style="font-family:var(--display);font-size:36px;font-weight:700;color:var(--muted)">—</div>
+              <div style="font-size:11px;color:var(--muted)">por instancia benchmark</div>
+            </div>
+            <div style="text-align:center">
+              <div style="font-family:var(--mono);font-size:11px;color:var(--teal);margin-bottom:4px">Capas QAOA (p)</div>
+              <div style="font-family:var(--display);font-size:36px;font-weight:700;color:var(--muted)">—</div>
+              <div style="font-size:11px;color:var(--muted)">profundidad del circuito</div>
+            </div>
+          </div>
+          <div class="placeholder" style="flex:1;min-height:160px">
+            <div class="placeholder-icon">⚛️</div>
+            <div>Diagrama del circuito QAOA<br><span style="font-size:10px;opacity:0.5">Mixer + Phase operator</span></div>
+          </div>
+          <div style="font-family:var(--mono);font-size:11px;color:var(--muted);padding:10px;background:rgba(0,0,0,0.2);border-radius:8px">
+            Hardware target: <span style="color:var(--aqua)">simulador / D-Wave</span><br>
+            Discretización δ: <span style="color:var(--aqua)">[ por definir ]</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══════════════════════════════════════════════════
+       SLIDE 5 — RESULTADOS
+  ══════════════════════════════════════════════════ -->
+  <div class="slide" id="s5">
+    <div class="slide-header">
+      <div class="aegis-wordmark"><svg width="20" height="20" viewBox="0 0 64 64" fill="none"><path d="M32 4 L56 16 L56 36 C56 49 44 58 32 62 C20 58 8 49 8 36 L8 16 Z" fill="none" stroke="#1A9B8C" stroke-width="2"/><circle cx="32" cy="35" r="5" fill="none" stroke="#4FC3C0" stroke-width="1.5"/><path d="M26 35 Q29 29 32 35 Q35 29 38 35" stroke="#4FC3C0" stroke-width="1.2" fill="none"/></svg>AEGIS</div>
+      <div class="slide-number">05 / 08</div>
+    </div>
+
+    <div class="eyebrow">Outputs del Modelo</div>
+    <div class="slide-title">Resultados por Escenario</div>
+    <div class="slide-sub">Comparación MILP vs QAOA bajo los tres escenarios de disponibilidad hídrica.</div>
+
+    <div class="grid-3" style="margin-bottom:20px">
+      <div class="card">
+        <div class="card-label">Normal (α=1.00)</div>
+        <div class="placeholder" style="height:120px;margin-top:8px">
+          <div class="placeholder-icon">📈</div>
+          <div>Asignación óptima<br><span style="font-size:10px;opacity:0.5">NWWD = ?</span></div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-label">Sequía moderada (α=0.80)</div>
+        <div class="placeholder" style="height:120px;margin-top:8px">
+          <div class="placeholder-icon">📈</div>
+          <div>Asignación óptima<br><span style="font-size:10px;opacity:0.5">NWWD = ?</span></div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-label">Sequía severa (α=0.60)</div>
+        <div class="placeholder" style="height:120px;margin-top:8px">
+          <div class="placeholder-icon">📈</div>
+          <div>Asignación óptima<br><span style="font-size:10px;opacity:0.5">NWWD = ?</span></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-label">Tabla comparativa MILP vs QAOA</div>
+      <table style="margin-top:12px">
+        <thead>
+          <tr>
+            <th>Escenario</th>
+            <th>NWWD (MILP)</th>
+            <th>NWWD (QAOA)</th>
+            <th>Δ relativo</th>
+            <th>Runtime MILP</th>
+            <th>Runtime QAOA</th>
+            <th>Factible</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Normal</td>
+            <td class="td-num" style="color:var(--muted)">—</td>
+            <td class="td-num" style="color:var(--muted)">—</td>
+            <td class="td-num" style="color:var(--muted)">—</td>
+            <td class="td-num" style="color:var(--muted)">—</td>
+            <td class="td-num" style="color:var(--muted)">—</td>
+            <td style="color:var(--muted)">—</td>
+          </tr>
+          <tr>
+            <td>Mod. drought</td>
+            <td class="td-num" style="color:var(--muted)">—</td>
+            <td class="td-num" style="color:var(--muted)">—</td>
+            <td class="td-num" style="color:var(--muted)">—</td>
+            <td class="td-num" style="color:var(--muted)">—</td>
+            <td class="td-num" style="color:var(--muted)">—</td>
+            <td style="color:var(--muted)">—</td>
+          </tr>
+          <tr>
+            <td>Severe</td>
+            <td class="td-num" style="color:var(--muted)">—</td>
+            <td class="td-num" style="color:var(--muted)">—</td>
+            <td class="td-num" style="color:var(--muted)">—</td>
+            <td class="td-num" style="color:var(--muted)">—</td>
+            <td class="td-num" style="color:var(--muted)">—</td>
+            <td style="color:var(--muted)">—</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- ══════════════════════════════════════════════════
+       SLIDE 6 — MÉTRICAS / VALIDACIÓN
+  ══════════════════════════════════════════════════ -->
+  <div class="slide" id="s6">
+    <div class="slide-header">
+      <div class="aegis-wordmark"><svg width="20" height="20" viewBox="0 0 64 64" fill="none"><path d="M32 4 L56 16 L56 36 C56 49 44 58 32 62 C20 58 8 49 8 36 L8 16 Z" fill="none" stroke="#1A9B8C" stroke-width="2"/><circle cx="32" cy="35" r="5" fill="none" stroke="#4FC3C0" stroke-width="1.5"/><path d="M26 35 Q29 29 32 35 Q35 29 38 35" stroke="#4FC3C0" stroke-width="1.2" fill="none"/></svg>AEGIS</div>
+      <div class="slide-number">06 / 08</div>
+    </div>
+
+    <div class="eyebrow">Validación del Modelo</div>
+    <div class="slide-title">¿Cómo sabemos que<br>la solución es correcta?</div>
+    <div class="slide-sub">Métricas de correctitud, factibilidad y comparación contra el baseline.</div>
+
+    <div class="grid-2" style="gap:20px">
+      <div style="display:flex;flex-direction:column;gap:16px">
+        <div class="card">
+          <div class="card-label">Métricas de factibilidad</div>
+          <div style="display:flex;flex-direction:column;gap:12px;margin-top:10px">
+            <div>
+              <div class="bar-label"><span>Restricción capacidad fuente</span><span style="color:var(--muted)">—%</span></div>
+              <div class="bar-track"><div class="bar-fill bar-teal" style="width:0%" id="bar-cap"></div></div>
+            </div>
+            <div>
+              <div class="bar-label"><span>Balance demanda urbana</span><span style="color:var(--muted)">—%</span></div>
+              <div class="bar-track"><div class="bar-fill bar-aqua" style="width:0%" id="bar-urb"></div></div>
+            </div>
+            <div>
+              <div class="bar-label"><span>Balance demanda agrícola</span><span style="color:var(--muted)">—%</span></div>
+              <div class="bar-track"><div class="bar-fill bar-yellow" style="width:0%" id="bar-agr"></div></div>
+            </div>
+            <div>
+              <div class="bar-label"><span>No-negatividad</span><span style="color:var(--muted)">—%</span></div>
+              <div class="bar-track"><div class="bar-fill bar-teal" style="width:0%" id="bar-pos"></div></div>
+            </div>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-label">Comparación de déficit normalizado</div>
+          <div class="grid-2" style="gap:12px;margin-top:10px">
+            <div style="text-align:center">
+              <div style="font-size:12px;color:var(--muted);margin-bottom:4px">Déficit Urbano</div>
+              <div style="font-family:var(--display);font-size:28px;font-weight:700;color:var(--muted)">—%</div>
+            </div>
+            <div style="text-align:center">
+              <div style="font-size:12px;color:var(--muted);margin-bottom:4px">Déficit Agrícola</div>
+              <div style="font-family:var(--display);font-size:28px;font-weight:700;color:var(--muted)">—%</div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:16px">
+        <div class="card">
+          <div class="card-label">Checklist de validación</div>
+          <div style="display:flex;flex-direction:column;gap:10px;margin-top:10px">
+            <div style="display:flex;align-items:center;gap:10px;font-size:13px">
+              <span style="width:20px;height:20px;border-radius:50%;background:rgba(79,195,192,0.1);border:1px solid var(--border);display:flex;align-items:center;justify-content:center;flex-shrink:0;color:var(--muted);font-size:11px">✓</span>
+              <span style="color:var(--muted)">MILP converge al óptimo global (solver garantía)</span>
+            </div>
+            <div style="display:flex;align-items:center;gap:10px;font-size:13px">
+              <span style="width:20px;height:20px;border-radius:50%;background:rgba(79,195,192,0.1);border:1px solid var(--border);display:flex;align-items:center;justify-content:center;flex-shrink:0;color:var(--muted);font-size:11px">✓</span>
+              <span style="color:var(--muted)">QUBO reproduce la misma función objetivo que el MILP</span>
+            </div>
+            <div style="display:flex;align-items:center;gap:10px;font-size:13px">
+              <span style="width:20px;height:20px;border-radius:50%;background:rgba(79,195,192,0.1);border:1px solid var(--border);display:flex;align-items:center;justify-content:center;flex-shrink:0;color:var(--muted);font-size:11px">✓</span>
+              <span style="color:var(--muted)">NWWD(QAOA) ≤ NWWD(MILP) + ε tolerancia</span>
+            </div>
+            <div style="display:flex;align-items:center;gap:10px;font-size:13px">
+              <span style="width:20px;height:20px;border-radius:50%;background:rgba(79,195,192,0.1);border:1px solid var(--border);display:flex;align-items:center;justify-content:center;flex-shrink:0;color:var(--muted);font-size:11px">✓</span>
+              <span style="color:var(--muted)">Soluciones infactibles identificadas y descartadas</span>
+            </div>
+            <div style="display:flex;align-items:center;gap:10px;font-size:13px">
+              <span style="width:20px;height:20px;border-radius:50%;background:rgba(79,195,192,0.1);border:1px solid var(--border);display:flex;align-items:center;justify-content:center;flex-shrink:0;color:var(--muted);font-size:11px">✓</span>
+              <span style="color:var(--muted)">Scaling analizado: n variables vs tamaño del problema</span>
+            </div>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-label">Gráfica de convergencia QAOA</div>
+          <div class="placeholder" style="height:110px">
+            <div class="placeholder-icon">📉</div>
+            <div>Energía vs. iteraciones<br><span style="font-size:10px;opacity:0.5">por profundidad p</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══════════════════════════════════════════════════
+       SLIDE 7 — VIABILIDAD FINANCIERA
+  ══════════════════════════════════════════════════ -->
+  <div class="slide" id="s7">
+    <div class="slide-header">
+      <div class="aegis-wordmark"><svg width="20" height="20" viewBox="0 0 64 64" fill="none"><path d="M32 4 L56 16 L56 36 C56 49 44 58 32 62 C20 58 8 49 8 36 L8 16 Z" fill="none" stroke="#1A9B8C" stroke-width="2"/><circle cx="32" cy="35" r="5" fill="none" stroke="#4FC3C0" stroke-width="1.5"/><path d="M26 35 Q29 29 32 35 Q35 29 38 35" stroke="#4FC3C0" stroke-width="1.2" fill="none"/></svg>AEGIS</div>
+      <div class="slide-number">07 / 08</div>
+    </div>
+
+    <div class="eyebrow">Viabilidad Financiera</div>
+    <div class="slide-title">AEGIS como emprendimiento</div>
+    <div class="slide-sub">Sistema SaaS de optimización hídrica para organismos operadores y autoridades de cuencas.</div>
+
+    <div class="grid-4" style="margin-bottom:20px">
+      <div class="card" style="text-align:center">
+        <div class="card-label">TIR</div>
+        <div class="fin-big">21<span class="fin-unit">%</span></div>
+        <div class="card-desc">TIR &gt; TREMA (15%)<br>Proyecto rentable</div>
+      </div>
+      <div class="card" style="text-align:center">
+        <div class="card-label">VPN</div>
+        <div class="fin-big" style="font-size:32px">$1.67<span class="fin-unit">M MXN</span></div>
+        <div class="card-desc">Valor presente neto de ganancias futuras</div>
+      </div>
+      <div class="card" style="text-align:center">
+        <div class="card-label">Recuperación</div>
+        <div class="fin-big">4.8<span class="fin-unit">años</span></div>
+        <div class="card-desc">Período de retorno de la inversión inicial</div>
+      </div>
+      <div class="card" style="text-align:center">
+        <div class="card-label">Mercado objetivo</div>
+        <div class="placeholder" style="height:70px">
+          <div style="font-size:11px;opacity:0.5">TAM / SAM por definir</div>
+        </div>
+        <div class="card-desc" style="margin-top:8px">Organismos operadores MX</div>
+      </div>
+    </div>
+
+    <div class="grid-2" style="gap:20px">
+      <div class="card">
+        <div class="card-label">Modelo de negocio</div>
+        <div style="display:flex;flex-direction:column;gap:10px;margin-top:10px">
+          <div style="display:flex;justify-content:space-between;align-items:center;font-size:13px">
+            <span>Licencia SaaS anual (organismo pequeño)</span>
+            <span class="placeholder" style="width:100px;height:28px;padding:0"><span style="font-size:10px;opacity:0.5">por def.</span></span>
+          </div>
+          <div style="display:flex;justify-content:space-between;align-items:center;font-size:13px">
+            <span>Licencia SaaS anual (cuenca / estado)</span>
+            <span class="placeholder" style="width:100px;height:28px;padding:0"><span style="font-size:10px;opacity:0.5">por def.</span></span>
+          </div>
+          <div style="display:flex;justify-content:space-between;align-items:center;font-size:13px">
+            <span>Consultoría implementación</span>
+            <span class="placeholder" style="width:100px;height:28px;padding:0"><span style="font-size:10px;opacity:0.5">por def.</span></span>
+          </div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-label">Flujo de caja proyectado</div>
+        <div class="placeholder" style="height:120px">
+          <div class="placeholder-icon">💹</div>
+          <div>Gráfica flujo 5 años<br><span style="font-size:10px;opacity:0.5">Año 0 – Año 5</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══════════════════════════════════════════════════
+       SLIDE 8 — EQUIPO / CIERRE
+  ══════════════════════════════════════════════════ -->
+  <div class="slide" id="s8">
+    <div class="slide-header">
+      <div class="aegis-wordmark"><svg width="20" height="20" viewBox="0 0 64 64" fill="none"><path d="M32 4 L56 16 L56 36 C56 49 44 58 32 62 C20 58 8 49 8 36 L8 16 Z" fill="none" stroke="#1A9B8C" stroke-width="2"/><circle cx="32" cy="35" r="5" fill="none" stroke="#4FC3C0" stroke-width="1.5"/><path d="M26 35 Q29 29 32 35 Q35 29 38 35" stroke="#4FC3C0" stroke-width="1.2" fill="none"/></svg>AEGIS</div>
+      <div class="slide-number">08 / 08</div>
+    </div>
+
+    <div class="eyebrow">Equipo & Conclusiones</div>
+    <div class="slide-title">AEGIS —<br><span class="aqua">Water Intelligence</span></div>
+
+    <div class="grid-2" style="gap:24px">
+      <div>
+        <div class="grid-2" style="gap:16px;margin-bottom:20px" id="team-grid">
+          <!-- Integrantes se agregan aquí -->
+          <div class="team-card">
+            <div class="avatar">?</div>
+            <div>
+              <div style="font-family:var(--display);font-weight:600;font-size:14px">[ Nombre ]</div>
+              <div style="font-size:12px;color:var(--muted)">[ Rol ]</div>
+            </div>
+          </div>
+          <div class="team-card">
+            <div class="avatar">?</div>
+            <div>
+              <div style="font-family:var(--display);font-weight:600;font-size:14px">[ Nombre ]</div>
+              <div style="font-size:12px;color:var(--muted)">[ Rol ]</div>
+            </div>
+          </div>
+          <div class="team-card">
+            <div class="avatar">?</div>
+            <div>
+              <div style="font-family:var(--display);font-weight:600;font-size:14px">[ Nombre ]</div>
+              <div style="font-size:12px;color:var(--muted)">[ Rol ]</div>
+            </div>
+          </div>
+          <div class="team-card">
+            <div class="avatar">?</div>
+            <div>
+              <div style="font-family:var(--display);font-weight:600;font-size:14px">[ Nombre ]</div>
+              <div style="font-size:12px;color:var(--muted)">[ Rol ]</div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:16px">
+        <div class="card">
+          <div class="card-label">Impacto SDG</div>
+          <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:10px">
+            <span class="tag tag-teal">SDG 6.4 Agua</span>
+            <span class="tag tag-teal">SDG 11 Ciudades</span>
+            <span class="tag tag-yellow">SDG 13 Clima</span>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-label">Conclusiones clave</div>
+          <div style="display:flex;flex-direction:column;gap:8px;margin-top:8px;font-size:13px;color:var(--muted)">
+            <div>✦ Estructura QUBO viable para el problema de asignación hídrica</div>
+            <div>✦ MILP garantiza óptimo global como referencia de comparación</div>
+            <div>✦ Distribución del déficit hídrico es un objetivo de diseño, no solo consecuencia</div>
+            <div>✦ La cuenca Alto Atoyac es un caso con potencial de scaling real</div>
+          </div>
+        </div>
+        <div class="card" style="text-align:center">
+          <div style="font-family:var(--display);font-size:20px;font-weight:700;color:var(--aqua);letter-spacing:0.1em">AEGIS</div>
+          <div style="font-size:12px;color:var(--muted);margin-top:4px">Adaptive Environmental Groundwater Intelligence System</div>
+          <div style="font-family:var(--mono);font-size:11px;color:var(--teal);margin-top:10px">QWorld OQI Hackathon-LATAM · 2026</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div><!-- end deck -->
+
+<!-- NAV BAR -->
+<div class="nav" id="navBar">
+  <button class="nav-prev" onclick="changeSlide(-1)">←</button>
+  <div class="dot-row" id="dotRow"></div>
+  <button class="nav-next" onclick="changeSlide(1)">→</button>
+</div>
+
+<script>
+  const slides = document.querySelectorAll('.slide');
+  const total = slides.length;
+  let current = 0;
+  const dotRow = document.getElementById('dotRow');
+  const progress = document.getElementById('progressLine');
+
+  // Build dots
+  slides.forEach((_, i) => {
+    const d = document.createElement('div');
+    d.className = 'dot' + (i === 0 ? ' active' : '');
+    d.onclick = () => goTo(i);
+    dotRow.appendChild(d);
+  });
+
+  function updateUI() {
+    document.querySelectorAll('.dot').forEach((d, i) => d.classList.toggle('active', i === current));
+    progress.style.width = ((current + 1) / total * 100) + '%';
+  }
+
+  function goTo(n) {
+    slides[current].classList.remove('active');
+    slides[current].classList.add('out');
+    setTimeout(() => slides[current].classList.remove('out'), 500);
+    current = (n + total) % total;
+    slides[current].classList.add('active');
+    updateUI();
+  }
+
+  function changeSlide(dir) { goTo(current + dir); }
+
+  document.addEventListener('keydown', e => {
+    if (e.key === 'ArrowRight' || e.key === 'ArrowDown') changeSlide(1);
+    if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') changeSlide(-1);
+  });
+
+  // Scenario pills
+  document.querySelectorAll('.scenario-pill').forEach(btn => {
+    btn.addEventListener('click', function() {
+      this.closest('.card').querySelectorAll('.scenario-pill').forEach(b => b.classList.remove('active-pill'));
+      this.classList.add('active-pill');
+    });
+  });
+
+  updateUI();
+</script>
+</body>
+</html>
