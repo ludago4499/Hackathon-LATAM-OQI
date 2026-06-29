@@ -37,7 +37,7 @@ def qubo_to_ising(qubo):
             h[p] -= v / 4.0
             h[q] -= v / 4.0
             J[(p, q)] = J.get((p, q), 0.0) + v / 4.0
-    return h, J, offset
+    return h, J, offset # we include the offset to not mess up NWWD calculation. 
 
 
 def run_qaoa(scenario="Normal", B=20, p=2, steps=60, penalty=None, seed=1):
