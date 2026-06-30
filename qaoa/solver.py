@@ -42,7 +42,7 @@ def qubo_to_ising(qubo):
 
 def run_qaoa(scenario="Normal", B=20, p=2, steps=60, penalty=None, seed=1,
              device=None, shots=512, urban_only=False, cap_mode="slack",
-             bounds=None):
+             bounds=None, lam=0.0):
     """Build the QUBO for a scenario and approximately minimize it with QAOA.
 
     Optimization is gradient-FREE (scipy COBYLA) over the 2*p angles (gamma, beta)
@@ -50,6 +50,10 @@ def run_qaoa(scenario="Normal", B=20, p=2, steps=60, penalty=None, seed=1,
     which stores every intermediate statevector and blows up RAM past ~22 qubits.
     Only the angle search differs from a gradient-based run; the QUBO, circuit,
     sampling and NWWD decoding are unchanged, so the reported score is exact.
+
+    lam    : weight on the allocation-cost term (forwarded to build_qubo). The
+             benchmark uses 0; set e.g. 0.1 to add lam * sum c_ij * x_ij to the
+             NWWD objective and pull solutions toward cheaper sources.
 
     device : PennyLane device name. Defaults to env QAOA_DEVICE, else
              "lightning.qubit" (fast C++ statevector, low memory). On a GPU box
@@ -62,7 +66,7 @@ def run_qaoa(scenario="Normal", B=20, p=2, steps=60, penalty=None, seed=1,
 
     device = device or os.environ.get("QAOA_DEVICE", "lightning.qubit")
 
-    qubo = build_qubo(scenario, B=B, penalty=penalty,
+    qubo = build_qubo(scenario, B=B, lam=lam, penalty=penalty,
                       urban_only=urban_only, cap_mode=cap_mode, bounds=bounds)
     n = qubo.num_qubits
     h, J, offset = qubo_to_ising(qubo)
@@ -143,7 +147,7 @@ def run_qaoa(scenario="Normal", B=20, p=2, steps=60, penalty=None, seed=1,
         if best is None or e < best[0]:
             best = (e, bitvec)
     result = decode(qubo, best[1], scenario)
-    result.update({"scenario": scenario, "B": B, "p": p,
+    result.update({"scenario": scenario, "B": B, "p": p, "lam": lam,
                    "num_qubits": n, "energy": best[0],
                    "urban_only": urban_only, "cap_mode": cap_mode,
                    "bitvec": best[1],
