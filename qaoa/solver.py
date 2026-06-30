@@ -3,13 +3,8 @@ QAOA solver starter (PennyLane).
 
 Pipeline:  QUBO  ->  Ising (h, J)  ->  cost Hamiltonian  ->  QAOA(p layers)
            ->  classical optimization of (gamma, beta)  ->  sample bitstrings
-           ->  decode best feasible allocation.
+           ->  decode best feasible allocation. (lowest energy) 
 
-This is a STARTER. The structure runs; the parts marked TODO are where the
-team tunes (p, optimizer, penalty, block size) to push the result toward the
-MILP optimum. Keep the framework choice in backend.py.
-
-Run:  python -m qaoa.solver        (needs: pip install pennylane)
 """
 import sys, os, gc
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -51,9 +46,10 @@ def run_qaoa(scenario="Normal", B=20, p=2, steps=60, penalty=None, seed=1,
     sampling and NWWD decoding are unchanged, so the reported score is exact.
 
     device : PennyLane device name. Defaults to env QAOA_DEVICE, else
-             "lightning.qubit" (fast C++ statevector, low memory). On a GPU box
-             set QAOA_DEVICE=lightning.gpu. Memory is 2**n * 16 bytes regardless
-             of optimizer, so exact simulation still caps around ~30 qubits.
+             "lightning.qubit" (fast C++ statevector, low memory). 
+             
+             On the GPU box we can set QAOA_DEVICE=lightning.gpu. Memory is 2**n * 16 bytes regardless
+             of optimizer, so exact simulation still caps around ~30 to 35 qubits.
     """
     import numpy as np
     import pennylane as qml
