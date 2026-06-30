@@ -11,7 +11,7 @@ MILP optimum. Keep the framework choice in backend.py.
 
 Run:  python -m qaoa.solver        (needs: pip install pennylane)
 """
-import sys, os, gc
+import sys, os, gc, time
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from qubo.builder import build_qubo, decode
@@ -72,6 +72,12 @@ def run_qaoa(scenario="Normal", B=20, p=2, steps=60, penalty=None, seed=1,
     from scipy.optimize import minimize
 
     device = device or os.environ.get("QAOA_DEVICE", "lightning.qubit")
+
+    # ---- Setup (one-time, NOT part of the solver benchmark) ----------------
+    # QUBO/Ising construction + circuit build + transpilation (first qnode
+    # trace/compile, forced via the warm-up call below). Measured separately
+    # from the optimization loop so the COBYLA timing below is clean.
+    t_setup0 = time.perf_counter()
 
     qubo = build_qubo(scenario, B=B, lam=lam, penalty=penalty,
                       urban_only=urban_only, cap_mode=cap_mode, bounds=bounds)
@@ -141,9 +147,20 @@ def run_qaoa(scenario="Normal", B=20, p=2, steps=60, penalty=None, seed=1,
         return np.concatenate([rng.uniform(0.0, 2 * np.pi, p),
                                rng.uniform(0.0, np.pi, p)])
 
+    # Warm up the qnode (first call traces/compiles the circuit) so that cost
+    # is folded into setup, not the first COBYLA iteration. Use restart 0's
+    # start angles for the trace.
+    cost(make_x0(0))
+    setup_time = time.perf_counter() - t_setup0
+
+    # ---- Optimization loop (the actual solver benchmark) -------------------
     # Track the best start by optimized expectation value (res.fun). All starts
     # share the same scaled Hamiltonian, so res.fun is directly comparable.
+    # t_opt0/opt_time wrap the ENTIRE restart loop, so opt_time is the wall time
+    # of the whole best-of-N search (every restart counted), not just one start.
+    t_opt0 = time.perf_counter()
     opt = {"fun": float("inf"), "params": None, "restart": -1, "evals": 0}
+    total_evals = 0
     for r in range(restarts):
         state = {"i": 0, "best": float("inf")}
 
@@ -159,6 +176,7 @@ def run_qaoa(scenario="Normal", B=20, p=2, steps=60, penalty=None, seed=1,
 
         res = minimize(objective, make_x0(r), method="COBYLA",
                        options={"maxiter": maxiter})   # TODO: try SPSA for noisy backends
+        total_evals += state["i"]
         if verbose:
             stop = "hit cap" if state["i"] >= maxiter else "converged early"
             print(f"    [qaoa {scenario} p={p}] restart {r}/{restarts - 1}: "
@@ -167,6 +185,7 @@ def run_qaoa(scenario="Normal", B=20, p=2, steps=60, penalty=None, seed=1,
         if res.fun < opt["fun"]:
             opt.update(fun=float(res.fun), params=res.x,
                        restart=r, evals=state["i"])
+    opt_time = time.perf_counter() - t_opt0
 
     params = opt["params"]
 
@@ -174,6 +193,9 @@ def run_qaoa(scenario="Normal", B=20, p=2, steps=60, penalty=None, seed=1,
     # RAM stays at one 2**n statevector instead of two (8GB -> 4GB at 28 qubits).
     del cost, dev
     gc.collect()
+
+    # ---- Final sampling + decoding ------------------------------------------
+    t_sample0 = time.perf_counter()
 
     # Sample to read out a bitstring.
     sdev = get_backend(framework="pennylane", name=device, wires=n, shots=shots)
@@ -191,6 +213,8 @@ def run_qaoa(scenario="Normal", B=20, p=2, steps=60, penalty=None, seed=1,
         e = qubo.energy(bitvec)
         if best is None or e < best[0]:
             best = (e, bitvec)
+    sample_time = time.perf_counter() - t_sample0
+
     result = decode(qubo, best[1], scenario)
     result.update({"scenario": scenario, "B": B, "p": p, "lam": lam,
                    "num_qubits": n, "energy": best[0],
@@ -199,7 +223,19 @@ def run_qaoa(scenario="Normal", B=20, p=2, steps=60, penalty=None, seed=1,
                    "best_restart": opt["restart"], "opt_evals": opt["evals"],
                    "best_expval": opt["fun"],
                    "bitvec": best[1],
-                   "values": {nm: qubo.value(nm, best[1]) for nm in qubo.registry}})
+                   "values": {nm: qubo.value(nm, best[1]) for nm in qubo.registry},
+                   "setup_time_s": setup_time,
+                   "optimize_time_s": opt_time,
+                   "sample_time_s": sample_time,
+                   "total_time_s": setup_time + opt_time + sample_time,
+                   "num_evals": total_evals})
+
+    if verbose:
+        print(f"    [qaoa {scenario} n={n}] timing  "
+              f"setup={setup_time:.3f}s  "
+              f"optimize={opt_time:.3f}s ({total_evals} evals)  "
+              f"sample={sample_time:.3f}s  "
+              f"total={setup_time + opt_time + sample_time:.3f}s", flush=True)
 
     # Release the sampler statevector so the next instance starts from a clean
     # slate (free memory before the next slot in a sweep).
