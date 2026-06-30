@@ -12,13 +12,13 @@ Idea (this is the whole trick):
   * Source capacity  sum_{j,d} x_{i,j}^d <= A_eff_i  becomes an equality with a
     capacity-slack variable, also added as a quadratic penalty.
 
-Output: a QUBO as an upper-triangular dict {(p, q): coeff} over bit indices,
-plus a constant offset. Minimizing  x^T Q x + offset  solves the instance.
+Output: a QUBO as an upper-triangular (by convention) dict   {(p, q): coeff} over bit indices,
+plus a constant offset. Minimizing  x^T Q x + offset  is the optimization
 
 Documented choices the challenge asks for (Section 1.9):
   - discretization strategy : fixed block size B (hm^3)
   - binary encoding         : standard base-2 expansion per variable
-  - penalty coefficient     : `penalty` (single P for all constraints; tune it)
+  - penalty coefficient     : `penalty` (single P for all constraints; can be tuned if necessary for specific model.)
   - number of binary vars   : build_qubo(...).num_qubits
   - feasibility             : decode() reports constraint residuals
 
@@ -112,7 +112,7 @@ def build_qubo(scenario, B=10, lam=0.0, penalty=None):
     weight = {"urban": wU, "agri": wA}
 
     if penalty is None:
-        penalty = 50.0 * max(wU, wA)
+        penalty = 50.0 * max(wU, wA) # 50 is big number
 
     qubo = QUBO()
 
@@ -133,7 +133,7 @@ def build_qubo(scenario, B=10, lam=0.0, penalty=None):
             qubo.add_linear([f"u_{d}_{j}"], weight[d] / demand[d][j])
 
     # optional allocation-cost term
-    if lam:
+    if lam: # if lam neq 0
         for d in ("urban", "agri"):
             for i in I:
                 for j in J:
@@ -186,9 +186,9 @@ def decode(qubo, bitvec, scenario):
 
 
 def brute_force(qubo):
-    """Exhaustively minimize energy. Only for <= ~22 qubits."""
+    """Exhaustively minimize energy. Only for <= ~40 qubits. (USING QPU SIMULATOR)""" 
     n = qubo.num_qubits
-    if n > 22:
+    if n > 40:
         raise ValueError(f"{n} qubits is too many to brute force")
     best = None
     for combo in itertools.product((0, 1), repeat=n):

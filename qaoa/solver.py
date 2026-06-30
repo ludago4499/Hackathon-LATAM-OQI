@@ -32,7 +32,7 @@ def qubo_to_ising(qubo):
         if p == q:                      # linear (diagonal) term: v * x_p
             offset += v / 2.0
             h[p] -= v / 2.0
-        else:                           # quadratic term: v * x_p x_q
+        else:                             # quadratic term: v * x_p x_q
             offset += v / 4.0
             h[p] -= v / 4.0
             h[q] -= v / 4.0
