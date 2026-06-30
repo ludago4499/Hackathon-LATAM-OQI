@@ -23,7 +23,7 @@ Documented choices the challenge asks for (Section 1.9):
   - feasibility             : decode() reports constraint residuals
 
 Run:  python -m qubo.builder           # full instance qubit counts
-      python -m qubo.builder --toy     # brute-force sanity check
+      python -m qubo.builder --toy     # brute-force sanity check (removed)
 """
 import sys, os, itertools, math
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -31,10 +31,10 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from data.instance import instance
 
 
-def _bits_for(upper_bound, B):
-    """Number of bits needed to represent 0..upper_bound in steps of B."""
+def _bits_for(upper_bound, B,lower_bound=0):
+    """Number of bits needed to represent lower_bound(0)    ..upper_bound in steps of B."""
     n_blocks = int(upper_bound // B)
-    return max(1, int(math.ceil(math.log2(n_blocks + 1))))
+    return max(1, int(math.ceil(math.log2(n_blocks-lower_bound + 1))))
 
 
 class QUBO:
@@ -136,6 +136,17 @@ def build_qubo(scenario, B=10, lam=0.0, penalty=None, urban_only=False,
     Du, Da = inst["urban_demand"], inst["agri_demand"]
     A, c = inst["sources"], inst["cost"]
     wU, wA = inst["w_urban"], inst["w_agri"]
+    # Snap every hm^3 quantity to the nearest block of B BEFORE building the
+    # QUBO, so demand/capacity land exactly on the encoding grid (zero balance
+    # residual). Anything rounding to 0 is bumped to one block (B) so no
+    # demand/source disappears and the NWWD denominator is never zero.
+    def _snap(v):
+        s = int(math.floor(v / B + 0.5)) * B   # nearest multiple, ties round up
+        return s if s > 0 else B               # 0 -> one block
+    Du = {j: _snap(v) for j, v in Du.items()}
+    Da = {j: _snap(v) for j, v in Da.items()}
+    A  = {i: _snap(v) for i, v in A.items()}
+
     demand = {"urban": Du, "agri": Da}
     weight = {"urban": wU, "agri": wA}
     dtypes = ("urban",) if urban_only else ("urban", "agri")
@@ -225,12 +236,24 @@ def decode(qubo, bitvec, scenario, tol=None):
     inst = instance(scenario)
     I, J = inst["source_names"], inst["municipalities"]
     Du, Da = inst["urban_demand"], inst["agri_demand"]
-    demand = {"urban": Du, "agri": Da}
-    weight = {"urban": inst["w_urban"], "agri": inst["w_agri"]}
     A = inst["sources"]
 
+    # Snap to the same block grid the QUBO was built on (see build_qubo), so the
+    # residual/NWWD targets match the encoding exactly.
+    B = float(getattr(qubo, "meta", {}).get("B", 0.0))
+    if B > 0:
+        def _snap(v):
+            s = int(math.floor(v / B + 0.5)) * B
+            return s if s > 0 else B
+        Du = {j: _snap(v) for j, v in Du.items()}
+        Da = {j: _snap(v) for j, v in Da.items()}
+        A  = {i: _snap(v) for i, v in A.items()}
+
+    demand = {"urban": Du, "agri": Da}
+    weight = {"urban": inst["w_urban"], "agri": inst["w_agri"]}
+
     if tol is None:                       # default slack = one block
-        tol = float(getattr(qubo, "meta", {}).get("B", 0.0)) or 1e-6
+        tol = B or 1e-6
 
     # demand types actually present in this QUBO (urban-only drops "agri")
     dtypes = tuple(getattr(qubo, "meta", {}).get("dtypes", ("urban", "agri")))
