@@ -19,7 +19,7 @@ OOM on a small box). Tomorrow on the big machine drop it for finer resolution:
 import os, sys
 
 from milp.baseline import main as run_milp
-from qubo.builder import brute_force, build_qubo
+from qubo.builder import build_qubo
 
 # ---- variant flags -------------------------------------------------------
 URBAN_ONLY = "--urban-only" in sys.argv
@@ -37,7 +37,7 @@ def qubo_section():
         tag.append("unbalanced-cap")
     suffix = f"  [{', '.join(tag)}]" if tag else ""
     print(f"\nFull-instance QUBO size (qubits){suffix}\n" + "=" * 48)
-    for B in (15, 10, 5): # Arbitrairly set Blocks of 20, 10 ,5. B -> 1 should tend to classic solution.
+    for B in (15, 10, 544): # Arbitrairly set Blocks of 20, 10 ,5. B -> 1 should tend to classic solution.
         sizes = {s: build_qubo(s, B=B, **VKW).num_qubits
                  for s in ("Normal", "Moderate", "Severe")}
         print(f"  B={B:2d} hm3:  " + "  ".join(f"{s}={n}" for s, n in sizes.items()))

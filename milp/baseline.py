@@ -81,23 +81,16 @@ def solve_milp(scenario, lam=0.0, urban_only=False):
         "norm_unmet_urban": {j: round(uu[j].value() / Du[j], 4) for j in J},
         "norm_unmet_agri": ({} if urban_only
                             else {j: round(ua[j].value() / Da[j], 4) for j in J}),
-        "allocation": {k: round(v, 4) for k, v in alloc.items() if v and v > 1e-6},
+        "alloc": {f"{i}->{j}[{d}]": round(v, 4)
+                  for (i, j, d), v in alloc.items() if v and v > 1e-9},
     }
 
 
-def main(lam=0.0, urban_only=False):
-    tag = " [urban-only]" if urban_only else ""
-    print(f"MILP baseline (lambda={lam}){tag}\n" + "=" * 48)
+def main(urban_only=False):
     for s in DROUGHT:
-        if s not in ("Normal", "Moderate", "Severe"):
-            continue
-        r = solve_milp(s, lam=lam, urban_only=urban_only)
-        print(f"\n{s} [{r['status']}]  NWWD = {r['NWWD']:.4f}")
-        uu = {j: v for j, v in r["unmet_urban"].items() if v > 1e-6}
-        ua = {j: v for j, v in r["unmet_agri"].items() if v > 1e-6}
-        print(f"  unmet urban: {uu or 'none'}")
-        if not urban_only:
-            print(f"  unmet agri : {ua or 'none'}")
+        r = solve_milp(s, urban_only=urban_only)
+        print(f"{s:9s} NWWD={r['NWWD']:.3f}  status={r['status']}  "
+              f"unmet_urban={r['unmet_urban']}")
 
 
 if __name__ == "__main__":

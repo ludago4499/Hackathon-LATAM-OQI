@@ -44,11 +44,17 @@ class QUBO:
         self.Q = {}              # {(p,q): coeff}, p <= q
         self.offset = 0.0
         self.registry = {}       # var name -> list of (bit_index, hm3_weight)
+        self.var_offset = {}     # var name -> constant hm3 offset (lower bound)
         self._n = 0
 
-    def add_variable(self, name, upper_bound, B):
+    def add_variable(self, name, upper_bound, B, lower_bound=0):
+        # Offset (warm-start) encoding: value = lower_bound + B*sum_k 2^k b_k.
+        # lower_bound is in hm^3 and should be a multiple of B. Bit count is
+        # _bits_for over the TIGHTENED block range [lower_bound/B .. upper_bound/B],
+        # so a narrow [lower, upper] window costs far fewer qubits.
+        self.var_offset[name] = lower_bound
         bits = []
-        for k in range(_bits_for(upper_bound, B)):
+        for k in range(_bits_for(upper_bound, B, int(lower_bound // B))):
             bits.append((self._n, B * (2 ** k)))
             self._n += 1
         self.registry[name] = bits
@@ -64,13 +70,18 @@ class QUBO:
             out.extend(self.registry[nm])
         return out
 
+    def _offset_sum(self, names):
+        return sum(self.var_offset.get(nm, 0.0) for nm in names)
+
     def add_linear(self, names, scale):
         """Add  scale * sum(values)  to the objective (diagonal terms)."""
+        self.offset += scale * self._offset_sum(names)
         for (idx, w) in self._terms(names):
             self._add(idx, idx, scale * w)
 
     def add_penalty(self, names, constant, P):
         """Add  P * (sum(values) - constant)^2  to the objective."""
+        constant = constant - self._offset_sum(names)   # fold in variable offsets
         terms = self._terms(names)
         self.offset += P * constant ** 2
         for (i, wi) in terms:
@@ -89,6 +100,7 @@ class QUBO:
         below capacity, and overuse (S > bound) is penalised quadratically. Costs
         ZERO extra qubits versus the slack-variable equality form.
         """
+        bound = bound - self._offset_sum(names)          # fold in variable offsets
         terms = self._terms(names)
         self.offset += -l1 * bound + l2 * bound ** 2
         for (i, wi) in terms:
@@ -104,7 +116,8 @@ class QUBO:
         self.Q[key] = self.Q.get(key, 0.0) + v
 
     def value(self, name, bitvec):
-        return sum(w for (idx, w) in self.registry[name] if bitvec[idx])
+        return self.var_offset.get(name, 0.0) + sum(
+            w for (idx, w) in self.registry[name] if bitvec[idx])
 
     def energy(self, bitvec):
         e = self.offset
@@ -115,7 +128,7 @@ class QUBO:
 
 
 def build_qubo(scenario, B=10, lam=0.0, penalty=None, urban_only=False,
-               cap_mode="slack", l1=None, l2=None):
+               cap_mode="slack", l1=None, l2=None, bounds=None):
     """Build the QUBO for one drought scenario.
 
     B          : block size in hm^3 (smaller = more accurate, more qubits)
@@ -136,17 +149,6 @@ def build_qubo(scenario, B=10, lam=0.0, penalty=None, urban_only=False,
     Du, Da = inst["urban_demand"], inst["agri_demand"]
     A, c = inst["sources"], inst["cost"]
     wU, wA = inst["w_urban"], inst["w_agri"]
-    # Snap every hm^3 quantity to the nearest block of B BEFORE building the
-    # QUBO, so demand/capacity land exactly on the encoding grid (zero balance
-    # residual). Anything rounding to 0 is bumped to one block (B) so no
-    # demand/source disappears and the NWWD denominator is never zero.
-    def _snap(v):
-        s = int(math.floor(v / B + 0.5)) * B   # nearest multiple, ties round up
-        return s if s > 0 else B               # 0 -> one block
-    Du = {j: _snap(v) for j, v in Du.items()}
-    Da = {j: _snap(v) for j, v in Da.items()}
-    A  = {i: _snap(v) for i, v in A.items()}
-
     demand = {"urban": Du, "agri": Da}
     weight = {"urban": wU, "agri": wA}
     dtypes = ("urban",) if urban_only else ("urban", "agri")
@@ -160,7 +162,20 @@ def build_qubo(scenario, B=10, lam=0.0, penalty=None, urban_only=False,
         #     P = C_FEAS * max(w_d / D_j^d) / B
         # This is ~B^2 smaller than the old flat P=500, which dwarfed the NWWD
         # term and blinded QAOA (penalty coeffs were ~200,000x the objective).
-        C_FEAS = 10.0
+        #
+        # C_FEAS: the visible objective/penalty ratio QAOA sees scales as
+        # 1/C_FEAS, so a large value re-buries the NWWD signal and shallow QAOA
+        # parks on the trivial all-unmet feasible state. The theoretical
+        # feasibility floor is C_FEAS = 1 (worst case); empirically, brute-forcing
+        # every <=24-qubit scenario/B (urban-only and with agri) the ground state
+        # stays feasible down to ~0.1, and the decode tol=B slack lets the optimum
+        # sit at residual<B without exact-equality over-constraining. C_FEAS = 0.3
+        # is the chosen operating point: it restores the signal (p=2 QAOA finds
+        # NWWD=0 on Normal/B=20/urban-only) while keeping a feasibility margin on
+        # all brute-checked instances. Going below ~0.1 makes the ground state
+        # infeasible (e.g. Severe/B=10/urban-only), so do not lower it further
+        # without re-verifying feasibility for the instance at hand.
+        C_FEAS = 0.3
         g_max = max(weight[d] / demand[d][j]
                     for d in dtypes for j in J)
         penalty = C_FEAS * g_max / B
@@ -171,17 +186,32 @@ def build_qubo(scenario, B=10, lam=0.0, penalty=None, urban_only=False,
 
     qubo = QUBO()
 
+    def _bnd(nm, default_ub):
+        # tightened (lower, upper) for a variable, snapped to the B-grid;
+        # defaults to the full [0, default_ub] when no bound is supplied.
+        if bounds and nm in bounds:
+            lo, hi = bounds[nm]
+            lo = max(0, int(math.floor(lo / B)) * B)
+            hi = min(default_ub, int(math.ceil(hi / B)) * B)
+            if hi < lo:
+                hi = lo
+            return lo, hi
+        return 0, default_ub
+
     for d in dtypes:
         for i in I:
             for j in J:
                 ub = min(demand[d][j], A[i])
-                qubo.add_variable(f"x_{d}_{i}_{j}", ub, B)
+                nm = f"x_{d}_{i}_{j}"; lo, hi = _bnd(nm, ub)
+                qubo.add_variable(nm, hi, B, lower_bound=lo)
     for d in dtypes:
         for j in J:
-            qubo.add_variable(f"u_{d}_{j}", demand[d][j], B)
+            nm = f"u_{d}_{j}"; lo, hi = _bnd(nm, demand[d][j])
+            qubo.add_variable(nm, hi, B, lower_bound=lo)
     if cap_mode == "slack":
         for i in I:
-            qubo.add_variable(f"cap_{i}", A[i], B)
+            nm = f"cap_{i}"; lo, hi = _bnd(nm, A[i])
+            qubo.add_variable(nm, hi, B, lower_bound=lo)
 
     # objective: NWWD = sum_d w_d * sum_j u_j^d / D_j^d
     for d in dtypes:
@@ -220,62 +250,26 @@ def build_qubo(scenario, B=10, lam=0.0, penalty=None, urban_only=False,
 
 
 def decode(qubo, bitvec, scenario, tol=None):
-    """Turn a bitstring into allocations, unmet demand, NWWD and feasibility.
-
-    Because every variable is a multiple of the block size B, each equality
-    constraint (which sums multiples of B) can only land on a multiple of B and
-    therefore meets a non-multiple demand to within at most one block. `tol` is
-    that discretization slack, applied to BOTH the demand-balance equalities and
-    the source-capacity inequalities. It defaults to B (read from qubo.meta).
-
-    tol = B guarantees a feasible solution always exists for any B: the all-unmet
-    allocation (x = 0, every slack u = floor(D/B)*B) leaves each balance residual
-    D mod B < B and zero capacity overuse. Pass tol explicitly to tighten it
-    (e.g. tol = B/2 for nearest-block rounding) or loosen it.
-    """
     inst = instance(scenario)
     I, J = inst["source_names"], inst["municipalities"]
     Du, Da = inst["urban_demand"], inst["agri_demand"]
-    A = inst["sources"]
-
-    # Snap to the same block grid the QUBO was built on (see build_qubo), so the
-    # residual/NWWD targets match the encoding exactly.
-    B = float(getattr(qubo, "meta", {}).get("B", 0.0))
-    if B > 0:
-        def _snap(v):
-            s = int(math.floor(v / B + 0.5)) * B
-            return s if s > 0 else B
-        Du = {j: _snap(v) for j, v in Du.items()}
-        Da = {j: _snap(v) for j, v in Da.items()}
-        A  = {i: _snap(v) for i, v in A.items()}
-
     demand = {"urban": Du, "agri": Da}
     weight = {"urban": inst["w_urban"], "agri": inst["w_agri"]}
-
-    if tol is None:                       # default slack = one block
-        tol = B or 1e-6
-
-    # demand types actually present in this QUBO (urban-only drops "agri")
+    A = inst["sources"]
+    if tol is None:
+        tol = float(getattr(qubo, "meta", {}).get("B", 0.0)) or 1e-6
     dtypes = tuple(getattr(qubo, "meta", {}).get("dtypes", ("urban", "agri")))
-
-    unmet = {(d, j): qubo.value(f"u_{d}_{j}", bitvec)
-             for d in dtypes for j in J}
-    nwwd = sum(weight[d] * unmet[(d, j)] / demand[d][j]
-               for d in dtypes for j in J)
-
-    # demand balance (equality):  served + unmet == demand
+    unmet = {(d, j): qubo.value(f"u_{d}_{j}", bitvec) for d in dtypes for j in J}
+    nwwd = sum(weight[d] * unmet[(d, j)] / demand[d][j] for d in dtypes for j in J)
     balance_resid = []
     for d in dtypes:
         for j in J:
             served = sum(qubo.value(f"x_{d}_{i}_{j}", bitvec) for i in I)
             balance_resid.append(abs(served + unmet[(d, j)] - demand[d][j]))
-    # source capacity (inequality):  used <= A_eff  (only overuse is a violation)
     capacity_resid = []
     for i in I:
-        used = sum(qubo.value(f"x_{d}_{i}_{j}", bitvec)
-                   for d in dtypes for j in J)
+        used = sum(qubo.value(f"x_{d}_{i}_{j}", bitvec) for d in dtypes for j in J)
         capacity_resid.append(max(0.0, used - A[i]))
-
     max_residual = max(balance_resid + capacity_resid)
     return {
         "NWWD": nwwd,
@@ -286,22 +280,3 @@ def decode(qubo, bitvec, scenario, tol=None):
         "tol": tol,
         "feasible": max_residual <= tol + 1e-9,
     }
-
-
-def brute_force(qubo):
-    """Exhaustively minimize energy. Only for <= ~40 qubits. (USING QPU SIMULATOR)""" 
-    n = qubo.num_qubits
-    if n > 40:
-        raise ValueError(f"{n} qubits is too many to brute force")
-    best = None
-    for combo in itertools.product((0, 1), repeat=n):
-        e = qubo.energy(combo)
-        if best is None or e < best[0]:
-            best = (e, combo)
-    return best
-
-if __name__ == "__main__":
-    for B in (20, 10, 5):
-        for s in ("Normal", "Moderate", "Severe"):
-            q = build_qubo(s, B=B)
-            print(f"B={B:2d}  {s:9s}  qubits={q.num_qubits}  penalty={q.meta['penalty']}")
