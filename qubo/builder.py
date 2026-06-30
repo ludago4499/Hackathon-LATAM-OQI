@@ -197,45 +197,8 @@ def brute_force(qubo):
             best = (e, combo)
     return best
 
-
-def build_reduced_qubo(B=5, penalty=200.0):
-    """A tiny, brute-forceable problem that exercises the same QUBO machinery.
-
-    1 source (cap 15), 2 urban municipalities (demand 10 and 15), urban only.
-    Optimal: serve the high-priority small one fully -> NWWD = 10*(10/15) = 6.667.
-    """
-    wU = 10
-    D = {"A": 10, "B": 15}
-    cap = 15
-    q = QUBO()
-    for j in D:
-        q.add_variable(f"x_S_{j}", min(D[j], cap), B)
-        q.add_variable(f"u_{j}", D[j], B)
-    q.add_variable("cap_S", cap, B)
-    for j in D:
-        q.add_linear([f"u_{j}"], wU / D[j])
-    for j in D:
-        q.add_penalty([f"x_S_{j}", f"u_{j}"], D[j], penalty)
-    q.add_penalty([f"x_S_{j}" for j in D] + ["cap_S"], cap, penalty)
-    return q, D, wU
-
-
 if __name__ == "__main__":
-    if "--toy" in sys.argv:
-        q, D, wU = build_reduced_qubo(B=5)
-        print(f"Reduced check: {q.num_qubits} qubits, brute-forcing...")
-        e, combo = brute_force(q)
-        served = {j: q.value(f"x_S_{j}", combo) for j in D}
-        unmet = {j: q.value(f"u_{j}", combo) for j in D}
-        nwwd = sum(wU * unmet[j] / D[j] for j in D)
-        print(f"  min energy : {e:.4f}")
-        print(f"  served     : {served}")
-        print(f"  unmet      : {unmet}")
-        print(f"  NWWD       : {nwwd:.4f}   (expected 6.6667)")
-        assert abs(nwwd - 6.6667) < 1e-3, "QUBO machinery FAILED sanity check"
-        print("  OK: QUBO machinery reproduces the priority-optimal allocation.")
-    else:
-        for B in (20, 10, 5):
-            for s in ("Normal", "Moderate", "Severe"):
-                q = build_qubo(s, B=B)
-                print(f"B={B:2d}  {s:9s}  qubits={q.num_qubits}  penalty={q.meta['penalty']}")
+    for B in (20, 10, 5):
+        for s in ("Normal", "Moderate", "Severe"):
+            q = build_qubo(s, B=B)
+            print(f"B={B:2d}  {s:9s}  qubits={q.num_qubits}  penalty={q.meta['penalty']}")

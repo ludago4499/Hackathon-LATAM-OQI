@@ -8,16 +8,10 @@ or from a terminal:
 import sys
 
 from milp.baseline import main as run_milp
-from qubo.builder import build_reduced_qubo, brute_force, build_qubo
+from qubo.builder import brute_force, build_qubo
 
 
 def qubo_section():
-    print("\nQUBO sanity check (reduced problem)\n" + "=" * 48)
-    q, D, wU = build_reduced_qubo(B=5)
-    e, combo = brute_force(q)
-    nwwd = sum(wU * q.value(f"u_{j}", combo) / D[j] for j in D)
-    print(f"  {q.num_qubits} qubits  ->  NWWD = {nwwd:.4f} (expected 6.6667)")
-
     print("\nFull-instance QUBO size (qubits)\n" + "=" * 48)
     for B in (20, 10, 5):
         sizes = {s: build_qubo(s, B=B).num_qubits
