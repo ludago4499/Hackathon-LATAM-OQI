@@ -79,6 +79,24 @@ class QUBO:
                 if j > i:
                     self._add(i, j, 2 * P * wi * wj)
 
+    def add_inequality_unbalanced(self, names, bound, l1, l2):
+        """Add a SLACK-FREE penalty for the inequality  sum(values) <= bound.
+
+        Unbalanced penalization (Montanez-Barrera et al. 2022): instead of a
+        slack variable, add  l1*(S - bound) + l2*(S - bound)^2  with S = sum of
+        the named values. Expanding (b_k^2 = b_k for binaries) gives diagonal and
+        pairwise terms only. The minimum sits at S* = bound - l1/(2*l2), i.e. just
+        below capacity, and overuse (S > bound) is penalised quadratically. Costs
+        ZERO extra qubits versus the slack-variable equality form.
+        """
+        terms = self._terms(names)
+        self.offset += -l1 * bound + l2 * bound ** 2
+        for (i, wi) in terms:
+            self._add(i, i, l1 * wi - 2 * l2 * bound * wi + l2 * wi * wi)
+            for (j, wj) in terms:
+                if j > i:
+                    self._add(i, j, 2 * l2 * wi * wj)
+
     def _add(self, p, q, v):
         if v == 0:
             return
@@ -96,12 +114,22 @@ class QUBO:
         return e
 
 
-def build_qubo(scenario, B=10, lam=0.0, penalty=None):
+def build_qubo(scenario, B=10, lam=0.0, penalty=None, urban_only=False,
+               cap_mode="slack", l1=None, l2=None):
     """Build the QUBO for one drought scenario.
 
-    B       : block size in hm^3 (smaller = more accurate, more qubits)
-    lam     : weight on allocation cost (benchmark uses 0)
-    penalty : constraint penalty P. If None, a heuristic value is chosen.
+    B          : block size in hm^3 (smaller = more accurate, more qubits)
+    lam        : weight on allocation cost (benchmark uses 0)
+    penalty    : constraint penalty P. If None, a heuristic value is chosen.
+    urban_only : if True, drop the agri demand type entirely. Removes all
+                 x_agri_* and u_agri_* variables and the agri balance penalties,
+                 leaving an urban-only objective and constraints (fewer qubits).
+    cap_mode   : "slack"      -> source capacity as an equality with a slack
+                                 variable cap_i (default, original behaviour).
+                 "unbalanced" -> source capacity as a slack-FREE inequality via
+                                 unbalanced penalization. Saves the cap_i qubits.
+    l1, l2     : coefficients for the unbalanced capacity term. Defaults
+                 l2 = penalty, l1 = penalty * B  (penalty minimum ~B/2 below cap).
     """
     inst = instance(scenario)
     I, J = inst["source_names"], inst["municipalities"]
@@ -110,52 +138,90 @@ def build_qubo(scenario, B=10, lam=0.0, penalty=None):
     wU, wA = inst["w_urban"], inst["w_agri"]
     demand = {"urban": Du, "agri": Da}
     weight = {"urban": wU, "agri": wA}
+    dtypes = ("urban",) if urban_only else ("urban", "agri")
 
     if penalty is None:
-        penalty = 50.0 * max(wU, wA) # 50 is big number
+        # Penalty per one-block (B hm^3) constraint violation should be a fixed
+        # multiple of the largest objective gain that block could buy, for ANY B.
+        # Worst objective gain per hm^3 is max_{d,j} (w_d / D_j^d); times B is the
+        # gain per block. Setting P * B^2 = C_FEAS * (gain per block) keeps the
+        # feasible region as the ground state with margin C_FEAS, independent of B:
+        #     P = C_FEAS * max(w_d / D_j^d) / B
+        # This is ~B^2 smaller than the old flat P=500, which dwarfed the NWWD
+        # term and blinded QAOA (penalty coeffs were ~200,000x the objective).
+        C_FEAS = 10.0
+        g_max = max(weight[d] / demand[d][j]
+                    for d in dtypes for j in J)
+        penalty = C_FEAS * g_max / B
+    if l2 is None:
+        l2 = penalty
+    if l1 is None:
+        l1 = penalty * B
 
     qubo = QUBO()
 
-    for d in ("urban", "agri"):
+    for d in dtypes:
         for i in I:
             for j in J:
                 ub = min(demand[d][j], A[i])
                 qubo.add_variable(f"x_{d}_{i}_{j}", ub, B)
-    for d in ("urban", "agri"):
+    for d in dtypes:
         for j in J:
             qubo.add_variable(f"u_{d}_{j}", demand[d][j], B)
-    for i in I:
-        qubo.add_variable(f"cap_{i}", A[i], B)
+    if cap_mode == "slack":
+        for i in I:
+            qubo.add_variable(f"cap_{i}", A[i], B)
 
     # objective: NWWD = sum_d w_d * sum_j u_j^d / D_j^d
-    for d in ("urban", "agri"):
+    for d in dtypes:
         for j in J:
             qubo.add_linear([f"u_{d}_{j}"], weight[d] / demand[d][j])
 
     # optional allocation-cost term
     if lam: # if lam neq 0
-        for d in ("urban", "agri"):
+        for d in dtypes:
             for i in I:
                 for j in J:
                     qubo.add_linear([f"x_{d}_{i}_{j}"], lam * c[(i, j)])
 
     # demand balance: sum_i x_{i,j}^d + u_j^d = D_j^d
-    for d in ("urban", "agri"):
+    for d in dtypes:
         for j in J:
             names = [f"x_{d}_{i}_{j}" for i in I] + [f"u_{d}_{j}"]
             qubo.add_penalty(names, demand[d][j], penalty)
 
-    # source capacity: sum_{j,d} x_{i,j}^d + cap_i = A_eff_i
+    # source capacity: sum_{j,d} x_{i,j}^d <= A_eff_i
     for i in I:
-        names = [f"x_{d}_{i}_{j}" for d in ("urban", "agri") for j in J] + [f"cap_{i}"]
-        qubo.add_penalty(names, A[i], penalty)
+        names = [f"x_{d}_{i}_{j}" for d in dtypes for j in J]
+        if cap_mode == "slack":
+            # equality with slack:  sum x + cap_i = A_eff_i
+            qubo.add_penalty(names + [f"cap_{i}"], A[i], penalty)
+        elif cap_mode == "unbalanced":
+            # slack-free inequality:  sum x <= A_eff_i
+            qubo.add_inequality_unbalanced(names, A[i], l1, l2)
+        else:
+            raise ValueError(f"unknown cap_mode {cap_mode!r}")
 
-    qubo.meta = {"scenario": scenario, "B": B, "lam": lam, "penalty": penalty}
+    qubo.meta = {"scenario": scenario, "B": B, "lam": lam, "penalty": penalty,
+                 "urban_only": urban_only, "cap_mode": cap_mode,
+                 "dtypes": dtypes, "l1": l1, "l2": l2}
     return qubo
 
 
-def decode(qubo, bitvec, scenario):
-    """Turn a bitstring into allocations, unmet demand, NWWD and feasibility."""
+def decode(qubo, bitvec, scenario, tol=None):
+    """Turn a bitstring into allocations, unmet demand, NWWD and feasibility.
+
+    Because every variable is a multiple of the block size B, each equality
+    constraint (which sums multiples of B) can only land on a multiple of B and
+    therefore meets a non-multiple demand to within at most one block. `tol` is
+    that discretization slack, applied to BOTH the demand-balance equalities and
+    the source-capacity inequalities. It defaults to B (read from qubo.meta).
+
+    tol = B guarantees a feasible solution always exists for any B: the all-unmet
+    allocation (x = 0, every slack u = floor(D/B)*B) leaves each balance residual
+    D mod B < B and zero capacity overuse. Pass tol explicitly to tighten it
+    (e.g. tol = B/2 for nearest-block rounding) or loosen it.
+    """
     inst = instance(scenario)
     I, J = inst["source_names"], inst["municipalities"]
     Du, Da = inst["urban_demand"], inst["agri_demand"]
@@ -163,25 +229,39 @@ def decode(qubo, bitvec, scenario):
     weight = {"urban": inst["w_urban"], "agri": inst["w_agri"]}
     A = inst["sources"]
 
-    unmet = {(d, j): qubo.value(f"u_{d}_{j}", bitvec)
-             for d in ("urban", "agri") for j in J}
-    nwwd = sum(weight[d] * unmet[(d, j)] / demand[d][j]
-               for d in ("urban", "agri") for j in J)
+    if tol is None:                       # default slack = one block
+        tol = float(getattr(qubo, "meta", {}).get("B", 0.0)) or 1e-6
 
-    resid = []
-    for d in ("urban", "agri"):
+    # demand types actually present in this QUBO (urban-only drops "agri")
+    dtypes = tuple(getattr(qubo, "meta", {}).get("dtypes", ("urban", "agri")))
+
+    unmet = {(d, j): qubo.value(f"u_{d}_{j}", bitvec)
+             for d in dtypes for j in J}
+    nwwd = sum(weight[d] * unmet[(d, j)] / demand[d][j]
+               for d in dtypes for j in J)
+
+    # demand balance (equality):  served + unmet == demand
+    balance_resid = []
+    for d in dtypes:
         for j in J:
             served = sum(qubo.value(f"x_{d}_{i}_{j}", bitvec) for i in I)
-            resid.append(abs(served + unmet[(d, j)] - demand[d][j]))
+            balance_resid.append(abs(served + unmet[(d, j)] - demand[d][j]))
+    # source capacity (inequality):  used <= A_eff  (only overuse is a violation)
+    capacity_resid = []
     for i in I:
         used = sum(qubo.value(f"x_{d}_{i}_{j}", bitvec)
-                   for d in ("urban", "agri") for j in J)
-        resid.append(max(0, used - A[i]))
+                   for d in dtypes for j in J)
+        capacity_resid.append(max(0.0, used - A[i]))
+
+    max_residual = max(balance_resid + capacity_resid)
     return {
         "NWWD": nwwd,
         "unmet": {f"{d}_{j}": v for (d, j), v in unmet.items() if v > 1e-9},
-        "max_residual": max(resid),
-        "feasible": max(resid) < 1e-6,
+        "max_balance_residual": max(balance_resid),
+        "max_capacity_residual": max(capacity_resid),
+        "max_residual": max_residual,
+        "tol": tol,
+        "feasible": max_residual <= tol + 1e-9,
     }
 
 
