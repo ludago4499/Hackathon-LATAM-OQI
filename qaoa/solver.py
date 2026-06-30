@@ -42,7 +42,7 @@ def qubo_to_ising(qubo):
 
 def run_qaoa(scenario="Normal", B=20, p=2, steps=60, penalty=None, seed=1,
              device=None, shots=512, urban_only=False, cap_mode="slack",
-             bounds=None, lam=0.0):
+             bounds=None, lam=0.0, restarts=None, max_iter=0):
     """Build the QUBO for a scenario and approximately minimize it with QAOA.
 
     Optimization is gradient-FREE (scipy COBYLA) over the 2*p angles (gamma, beta)
@@ -51,14 +51,21 @@ def run_qaoa(scenario="Normal", B=20, p=2, steps=60, penalty=None, seed=1,
     Only the angle search differs from a gradient-based run; the QUBO, circuit,
     sampling and NWWD decoding are unchanged, so the reported score is exact.
 
-    lam    : weight on the allocation-cost term (forwarded to build_qubo). The
-             benchmark uses 0; set e.g. 0.1 to add lam * sum c_ij * x_ij to the
-             NWWD objective and pull solutions toward cheaper sources.
+    lam      : weight on the allocation-cost term (forwarded to build_qubo). The
+               benchmark uses 0; set e.g. 0.1 to add lam * sum c_ij * x_ij to the
+               NWWD objective and pull solutions toward cheaper sources.
 
-    device : PennyLane device name. Defaults to env QAOA_DEVICE, else
-             "lightning.qubit" (fast C++ statevector, low memory). On a GPU box
-             set QAOA_DEVICE=lightning.gpu. Memory is 2**n * 16 bytes regardless
-             of optimizer, so exact simulation still caps around ~30 qubits.
+    device   : PennyLane device name. Defaults to env QAOA_DEVICE, else
+               "lightning.qubit" (fast C++ statevector, low memory). On a GPU box
+               set QAOA_DEVICE=lightning.gpu. Memory is 2**n * 16 bytes regardless
+               of optimizer, so exact simulation still caps around ~30 qubits.
+    restarts : number of independent angle starts (best-of-N). None reads env
+               QAOA_RESTARTS (default 1). restart 0 keeps the flat 0.3 warm start
+               so best-of-N can never beat the single-start baseline; restarts 1..
+               use random angles. The start with the lowest optimized expectation
+               value (res.fun) wins.
+    max_iter : COBYLA eval budget per restart. Precedence: explicit max_iter (>0)
+               overrides `steps`, which overrides the p-scaled default (30*p).
     """
     import numpy as np
     import pennylane as qml
@@ -105,25 +112,63 @@ def run_qaoa(scenario="Normal", B=20, p=2, steps=60, penalty=None, seed=1,
         ansatz(params)
         return qml.expval(H_cost)
 
-    np.random.seed(seed)
-    x0 = np.full(2 * p, 0.3)
+    np.random.seed(seed)            # keep the readout sampling reproducible
+    rng = np.random.default_rng(seed)   # independent stream for restart angles
+
+    # Optimizer budget. Precedence: explicit max_iter (>0) > steps > p-scaled
+    # default (30 COBYLA evals per layer). max_iter=0 means "not given".
+    if max_iter:
+        maxiter = max_iter
+    elif steps is not None:
+        maxiter = steps
+    else:
+        maxiter = 30 * p
+    # Number of independent starts (best-of-N). Env override: QAOA_RESTARTS.
+    if restarts is None:
+        restarts = int(os.environ.get("QAOA_RESTARTS", "1"))
+    restarts = max(1, restarts)
+
     # Live progress so the run isn't silent during the optimizer loop.
     # Set QAOA_VERBOSE=0 to mute (e.g. inside the sweep).
     verbose = os.environ.get("QAOA_VERBOSE", "1") != "0"
-    state = {"i": 0, "best": float("inf")}
 
-    def objective(x):
-        e = float(cost(x))
-        state["i"] += 1
-        state["best"] = min(state["best"], e)
-        if verbose and state["i"] % 5 == 0:
-            print(f"    [qaoa {scenario} n={n}] eval {state['i']:3d}  "
-                  f"E={e:.4f}  best={state['best']:.4f}", flush=True)
-        return e
+    def make_x0(r):
+        # restart 0 keeps the old flat warm start, so best-of-N can never do
+        # worse than the single-start baseline; restarts 1.. are random angles
+        # (gammas in [0, 2pi), betas in [0, pi)).
+        if r == 0:
+            return np.full(2 * p, 0.3)
+        return np.concatenate([rng.uniform(0.0, 2 * np.pi, p),
+                               rng.uniform(0.0, np.pi, p)])
 
-    res = minimize(objective, x0, method="COBYLA",
-                   options={"maxiter": steps})      # TODO: try SPSA for noisy backends
-    params = res.x
+    # Track the best start by optimized expectation value (res.fun). All starts
+    # share the same scaled Hamiltonian, so res.fun is directly comparable.
+    opt = {"fun": float("inf"), "params": None, "restart": -1, "evals": 0}
+    for r in range(restarts):
+        state = {"i": 0, "best": float("inf")}
+
+        def objective(x):
+            e = float(cost(x))
+            state["i"] += 1
+            state["best"] = min(state["best"], e)
+            if verbose and state["i"] % 5 == 0:
+                print(f"    [qaoa {scenario} n={n} p={p} r={r}] "
+                      f"eval {state['i']:3d}  E={e:.4f}  best={state['best']:.4f}",
+                      flush=True)
+            return e
+
+        res = minimize(objective, make_x0(r), method="COBYLA",
+                       options={"maxiter": maxiter})   # TODO: try SPSA for noisy backends
+        if verbose:
+            stop = "hit cap" if state["i"] >= maxiter else "converged early"
+            print(f"    [qaoa {scenario} p={p}] restart {r}/{restarts - 1}: "
+                  f"final={res.fun:.4f}  evals={state['i']}/{maxiter} ({stop})  "
+                  f"incumbent={min(opt['fun'], res.fun):.4f}", flush=True)
+        if res.fun < opt["fun"]:
+            opt.update(fun=float(res.fun), params=res.x,
+                       restart=r, evals=state["i"])
+
+    params = opt["params"]
 
     # Free the optimizer's statevector BEFORE allocating the sampler's, so peak
     # RAM stays at one 2**n statevector instead of two (8GB -> 4GB at 28 qubits).
@@ -150,6 +195,9 @@ def run_qaoa(scenario="Normal", B=20, p=2, steps=60, penalty=None, seed=1,
     result.update({"scenario": scenario, "B": B, "p": p, "lam": lam,
                    "num_qubits": n, "energy": best[0],
                    "urban_only": urban_only, "cap_mode": cap_mode,
+                   "restarts": restarts, "maxiter": maxiter,
+                   "best_restart": opt["restart"], "opt_evals": opt["evals"],
+                   "best_expval": opt["fun"],
                    "bitvec": best[1],
                    "values": {nm: qubo.value(nm, best[1]) for nm in qubo.registry}})
 
