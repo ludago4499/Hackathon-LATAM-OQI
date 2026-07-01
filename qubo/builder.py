@@ -2,7 +2,7 @@
 QUBO formulation of the Alto Atoyac water-allocation benchmark.
 
 Idea (this is the whole trick):
-  * Each continuous allocation x_{i,j}^d (source i -> municipality j, demand
+  * Each continuous allocation x_{i,j}^d (water goes from source i -> municipality j, demand
     type d in {urban, agri}) is DISCRETIZED into integer blocks of size B hm^3,
     encoded in binary:  x = B * sum_k 2^k * b_k.
   * The UNMET demand u_j^d is represented by a slack variable, also in blocks.
@@ -12,7 +12,7 @@ Idea (this is the whole trick):
   * Source capacity  sum_{j,d} x_{i,j}^d <= A_eff_i  becomes an equality with a
     capacity-slack variable, also added as a quadratic penalty.
 
-Output: a QUBO as an upper-triangular (by convention) dict   {(p, q): coeff} over bit indices,
+Output of builder.py: a QUBO as an upper-triangular (by convention) dict   {(p, q): coeff} over bit indices,
 plus a constant offset. Minimizing  x^T Q x + offset  is the optimization
 
 Documented choices the challenge asks for (Section 1.9):
@@ -55,7 +55,7 @@ class QUBO:
         self.var_offset[name] = lower_bound
         bits = []
         for k in range(_bits_for(upper_bound, B, int(lower_bound // B))):
-            bits.append((self._n, B * (2 ** k)))
+            bits.append((self._n, B * (2 ** k))) # (n,val)
             self._n += 1
         self.registry[name] = bits
         return bits

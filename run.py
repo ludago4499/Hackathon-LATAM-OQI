@@ -37,7 +37,7 @@ def qubo_section():
         tag.append("unbalanced-cap")
     suffix = f"  [{', '.join(tag)}]" if tag else ""
     print(f"\nFull-instance QUBO size (qubits){suffix}\n" + "=" * 48)
-    for B in (20, 15, 10): # Arbitrairly set Blocks of 20, 10 ,5. B -> 1 should tend to classic solution.
+    for B in (25,24,23,22,21,20,19,18, 15,14,13, 12,10,1): # Arbitrairly set Blocks of 20, 10 ,5. B -> 1 should tend to classic solution.
         sizes = {s: build_qubo(s, B=B, **VKW).num_qubits
                  for s in ("Normal", "Moderate", "Severe")}
         print(f"  B={B:2d} hm3:  " + "  ".join(f"{s}={n}" for s, n in sizes.items()))

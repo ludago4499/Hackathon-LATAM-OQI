@@ -49,7 +49,7 @@ def run_qaoa(scenario="Normal", B=20, p=2, steps=60, penalty=None, seed=1,
     on a forward-only qnode (diff_method=None). This avoids autograd backprop,
     which stores every intermediate statevector and blows up RAM past ~22 qubits.
     Only the angle search differs from a gradient-based run; the QUBO, circuit,
-    sampling and NWWD decoding are unchanged, so the reported score is exact.
+    sampling and NWWD decoding are unchanged, so the reported score is trustworthy.
 
     lam      : weight on the allocation-cost term (forwarded to build_qubo). The
                benchmark uses 0; set e.g. 0.1 to add lam * sum c_ij * x_ij to the
@@ -82,7 +82,7 @@ def run_qaoa(scenario="Normal", B=20, p=2, steps=60, penalty=None, seed=1,
     qubo = build_qubo(scenario, B=B, lam=lam, penalty=penalty,
                       urban_only=urban_only, cap_mode=cap_mode, bounds=bounds)
     n = qubo.num_qubits
-    h, J, offset = qubo_to_ising(qubo)
+    h, J, offset = qubo_to_ising(qubo) # check offset (is not used)
 
     # Cost Hamiltonian as a PennyLane observable.
     coeffs, ops = [], []
@@ -121,11 +121,10 @@ def run_qaoa(scenario="Normal", B=20, p=2, steps=60, penalty=None, seed=1,
     np.random.seed(seed)            # keep the readout sampling reproducible
     rng = np.random.default_rng(seed)   # independent stream for restart angles
 
-    # Optimizer budget. Precedence: explicit max_iter (>0) > steps > p-scaled
-    # default (30 COBYLA evals per layer). max_iter=0 means "not given".
+    # Optimizer budget. Precedence: explicit max_iter (>0) > steps > p-scaled maxiteration hueristic.
     if max_iter:
         maxiter = max_iter
-    elif steps is not None:
+    elif steps is not None: # steps is by default equal to 60
         maxiter = steps
     else:
         maxiter = 30 * p
@@ -174,7 +173,7 @@ def run_qaoa(scenario="Normal", B=20, p=2, steps=60, penalty=None, seed=1,
                       flush=True)
             return e
 
-        res = minimize(objective, make_x0(r), method="COBYLA",
+        res = minimize(objective, make_x0(r), method="COBYLA", 
                        options={"maxiter": maxiter})   # TODO: try SPSA for noisy backends
         total_evals += state["i"]
         if verbose:
