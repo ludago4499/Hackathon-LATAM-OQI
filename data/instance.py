@@ -37,7 +37,7 @@ DROUGHT = {
 
 # --- A.5 Source -> municipality allocation cost ---------------------------
 # Relative delivery difficulty (NOT real infrastructure cost). Used only if lambda > 0.
-# not used currently since lambda neq 0
+# not used currently since lambda = 0
 COST = {
     ("VdP", "Puebla"): 1.0,
     ("VdP", "SAC"): 1.2,

@@ -19,10 +19,12 @@ import pulp
 from data.instance import instance, DROUGHT
 
 
-def solve_milp(scenario, lam=0.0):
+def solve_milp(scenario, lam=0.0, urban_only=False):
     """Solve the allocation LP/MILP for one drought scenario.
 
     lam (lambda): weight on allocation cost. The benchmark uses lam = 0.
+    urban_only  : if True, drop agriculture entirely (no agri demand, balance or
+                  objective term) so this matches the urban-only QUBO variant.
     Returns a results dict with NWWD, allocations and unmet demand.
     """
     inst = instance(scenario)
@@ -40,48 +42,55 @@ def solve_milp(scenario, lam=0.0):
     uu = pulp.LpVariable.dicts("uu", J, lowBound=0)        # unmet urban
     ua = pulp.LpVariable.dicts("ua", J, lowBound=0)        # unmet agri
 
-    # Objective: NWWD (+ optional cost term)
-    nwwd = (wU * pulp.lpSum(uu[j] / Du[j] for j in J)
-            + wA * pulp.lpSum(ua[j] / Da[j] for j in J))
-    cost = pulp.lpSum(c[(i, j)] * (xu[i][j] + xa[i][j]) for i in I for j in J)
+    # Objective: NWWD (+ optional cost term). Agri terms vanish if urban_only.
+    nwwd = wU * pulp.lpSum(uu[j] / Du[j] for j in J)
+    if not urban_only:
+        nwwd += wA * pulp.lpSum(ua[j] / Da[j] for j in J)
+    if urban_only:
+        cost = pulp.lpSum(c[(i, j)] * xu[i][j] for i in I for j in J)
+    else:
+        cost = pulp.lpSum(c[(i, j)] * (xu[i][j] + xa[i][j]) for i in I for j in J)
     m += nwwd + lam * cost
 
-    # Source capacity
+    # Source capacity (agri usage included only when not urban_only)
     for i in I:
-        m += pulp.lpSum(xu[i][j] + xa[i][j] for j in J) <= A[i], f"cap_{i}"
-    # Demand balance (urban + agri)
+        used = pulp.lpSum(xu[i][j] for j in J)
+        if not urban_only:
+            used += pulp.lpSum(xa[i][j] for j in J)
+        m += used <= A[i], f"cap_{i}"
+    # Demand balance
     for j in J:
         m += pulp.lpSum(xu[i][j] for i in I) + uu[j] == Du[j], f"urb_{j}"
-        m += pulp.lpSum(xa[i][j] for i in I) + ua[j] == Da[j], f"agr_{j}"
+        if not urban_only:
+            m += pulp.lpSum(xa[i][j] for i in I) + ua[j] == Da[j], f"agr_{j}"
 
     m.solve(pulp.PULP_CBC_CMD(msg=0))
 
     alloc = {(i, j, "urban"): xu[i][j].value() for i in I for j in J}
-    alloc.update({(i, j, "agri"): xa[i][j].value() for i in I for j in J})
+    if not urban_only:
+        alloc.update({(i, j, "agri"): xa[i][j].value() for i in I for j in J})
     return {
         "scenario": scenario,
+        "urban_only": urban_only,
         "status": pulp.LpStatus[m.status],
         "NWWD": pulp.value(nwwd),
         "objective": pulp.value(m.objective),
         "unmet_urban": {j: round(uu[j].value(), 4) for j in J},
-        "unmet_agri": {j: round(ua[j].value(), 4) for j in J},
+        "unmet_agri": ({} if urban_only
+                       else {j: round(ua[j].value(), 4) for j in J}),
         "norm_unmet_urban": {j: round(uu[j].value() / Du[j], 4) for j in J},
-        "norm_unmet_agri": {j: round(ua[j].value() / Da[j], 4) for j in J},
-        "allocation": {k: round(v, 4) for k, v in alloc.items() if v and v > 1e-6},
+        "norm_unmet_agri": ({} if urban_only
+                            else {j: round(ua[j].value() / Da[j], 4) for j in J}),
+        "alloc": {f"{i}->{j}[{d}]": round(v, 4)
+                  for (i, j, d), v in alloc.items() if v and v > 1e-9},
     }
 
 
-def main(lam=0.0):
-    print(f"MILP baseline (lambda={lam})\n" + "=" * 48)
+def main(urban_only=False):
     for s in DROUGHT:
-        if s not in ("Normal", "Moderate", "Severe"):
-            continue
-        r = solve_milp(s, lam=lam)
-        print(f"\n{s} [{r['status']}]  NWWD = {r['NWWD']:.4f}")
-        uu = {j: v for j, v in r["unmet_urban"].items() if v > 1e-6}
-        ua = {j: v for j, v in r["unmet_agri"].items() if v > 1e-6}
-        print(f"  unmet urban: {uu or 'none'}")
-        print(f"  unmet agri : {ua or 'none'}")
+        r = solve_milp(s, urban_only=urban_only)
+        print(f"{s:9s} NWWD={r['NWWD']:.3f}  status={r['status']}  "
+              f"unmet_urban={r['unmet_urban']}")
 
 
 if __name__ == "__main__":

@@ -83,22 +83,13 @@ Start at B=20 on a simulator; shrink B as resources allow.
 
 ## QCentroid
 
-Local repo = what runs on QCentroid. `git clone` into the **Launchpad** Jupyter
+Local repo = what runs on QCentroid. `git clone` or directly copy files into the **Launchpad** Jupyter
 environment, `pip install -r requirements.txt`, run. Backend choice lives only in
 `backend.py` — switch local simulator → GPU sim → real QPU by changing the
-device name (or env vars `QAOA_FRAMEWORK` / `QAOA_DEVICE`), no logic changes.
+device name (or env vars `QAOA_FRAMEWORK` / `QAOA_DEVICE`), no logic changes to main code.
 
 ## Deliverables checklist (Annex B)
 
 For each of Normal / Moderate / Severe, report: NWWD, allocation decisions,
 unmet urban + agri (raw and normalized), feasibility, runtime, and number of
 binary variables in the QUBO. Compare MILP vs QUBO(brute) vs QAOA.
-
-## Workflow / ownership
-
-- **data/** — commit first; everyone builds against the same instance.
-- **milp/** — owner A (ground truth + plots).
-- **qubo/ + qaoa/** — owners B/C (formulation, penalty tuning, QAOA).
-- **report** — owner D (assemble the Annex B table + slides).
-
-Short-lived branches + quick PRs, or commit to `main` for speed.
